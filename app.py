@@ -6,8 +6,13 @@ import time
 import re
 import io
 from urllib.parse import urljoin, urlparse
-from weasyprint import HTML as WeasyprintHTML
 from datetime import datetime
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import cm
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+from reportlab.lib.enums import TA_LEFT, TA_CENTER
 
 app = Flask(__name__)
 CORS(app)
@@ -255,6 +260,172 @@ def compute_score(results):
         score -= 4; deductions.append("Carga lenta (-4)")
     return max(score, 0), deductions
 
+def build_pdf_reportlab(d):
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4,
+                            leftMargin=2*cm, rightMargin=2*cm,
+                            topMargin=2*cm, bottomMargin=2*cm)
+
+    GREEN = colors.HexColor('#00E5A0')
+    RED   = colors.HexColor('#EF4444')
+    YELLOW= colors.HexColor('#FBBF24')
+    DARK  = colors.HexColor('#0D1017')
+    GRAY  = colors.HexColor('#6B7A94')
+    LIGHT = colors.HexColor('#F3F4F6')
+
+    score_color = GREEN if d['score'] >= 80 else YELLOW if d['score'] >= 60 else RED
+
+    styles = getSampleStyleSheet()
+    title_style   = ParagraphStyle('title',   fontName='Helvetica-Bold', fontSize=18, textColor=GREEN,   spaceAfter=4)
+    sub_style     = ParagraphStyle('sub',     fontName='Helvetica',      fontSize=9,  textColor=GRAY,    spaceAfter=2)
+    h2_style      = ParagraphStyle('h2',      fontName='Helvetica-Bold', fontSize=11, textColor=DARK,    spaceBefore=10, spaceAfter=4)
+    body_style    = ParagraphStyle('body',    fontName='Helvetica',      fontSize=8,  textColor=colors.HexColor('#374151'), spaceAfter=3, leading=12)
+    mono_style    = ParagraphStyle('mono',    fontName='Courier',        fontSize=8,  textColor=DARK,    spaceAfter=3, backColor=LIGHT, borderPad=4)
+    issue_style   = ParagraphStyle('issue',   fontName='Helvetica',      fontSize=8,  textColor=colors.HexColor('#374151'), spaceAfter=2, leading=11)
+    footer_style  = ParagraphStyle('footer',  fontName='Helvetica',      fontSize=7,  textColor=GRAY,    alignment=TA_CENTER)
+
+    story = []
+    now = datetime.now().strftime("%d/%m/%Y %H:%M")
+
+    # Header table
+    header_data = [[
+        Paragraph('🔍 SEO Analyzer Report', title_style),
+        Paragraph(f'Generado: {now}<br/>by Alberto Labarta · github.com/Albertini97', sub_style)
+    ]]
+    header_table = Table(header_data, colWidths=[10*cm, 7*cm])
+    header_table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,-1), DARK),
+        ('PADDING', (0,0), (-1,-1), 12),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('ALIGN', (1,0), (1,0), 'RIGHT'),
+    ]))
+    story.append(header_table)
+    story.append(Spacer(1, 0.4*cm))
+
+    # Score box
+    score_label = '✅ Buen SEO' if d['score'] >= 80 else '⚠️ SEO mejorable' if d['score'] >= 60 else '❌ SEO deficiente'
+    ded_text = '  ·  '.join(d['deductions']) if d['deductions'] else 'Sin penalizaciones'
+    score_data = [[
+        Paragraph(f'<font size=28><b>{d["score"]}</b></font><font size=10 color="#6B7A94"> / 100</font>', ParagraphStyle('sc', fontName='Helvetica-Bold', fontSize=28, textColor=score_color)),
+        [Paragraph(f'<b>{score_label}</b>', ParagraphStyle('sl', fontName='Helvetica-Bold', fontSize=12, textColor=score_color, spaceAfter=4)),
+         Paragraph(d['url'], ParagraphStyle('su', fontName='Courier', fontSize=7, textColor=GRAY, spaceAfter=6)),
+         Paragraph(ded_text, ParagraphStyle('sd', fontName='Helvetica', fontSize=7, textColor=RED))]
+    ]]
+    score_table = Table(score_data, colWidths=[3.5*cm, 13.5*cm])
+    score_table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,-1), LIGHT),
+        ('LEFTPADDING', (0,0), (0,0), 16),
+        ('PADDING', (1,0), (1,0), 12),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('LINEAFTER', (0,0), (0,0), 1, score_color),
+        ('BOX', (0,0), (-1,-1), 0.5, score_color),
+    ]))
+    story.append(score_table)
+    story.append(Spacer(1, 0.5*cm))
+
+    # PageSpeed
+    ps = d.get('pagespeed', {})
+    if ps.get('available'):
+        story.append(Paragraph('⚡ Core Web Vitals · Google PageSpeed (móvil)', h2_style))
+        cwv_data = [
+            ['Performance', 'SEO Score', 'Accesibilidad', 'LCP', 'TBT', 'CLS'],
+            [str(ps['performance_score']), str(ps['seo_score']), str(ps['accessibility_score']),
+             ps['lcp'], ps['tbt'], ps['cls']]
+        ]
+        cwv_table = Table(cwv_data, colWidths=[2.8*cm]*6)
+        cwv_table.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), DARK),
+            ('TEXTCOLOR', (0,0), (-1,0), GREEN),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0,0), (-1,-1), 8),
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('ROWBACKGROUNDS', (0,1), (-1,-1), [LIGHT, colors.white]),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#E5E7EB')),
+            ('PADDING', (0,0), (-1,-1), 8),
+        ]))
+        story.append(cwv_table)
+        story.append(Spacer(1, 0.4*cm))
+
+    def section(title, issues, value=None):
+        story.append(HRFlowable(width='100%', thickness=0.5, color=colors.HexColor('#E5E7EB'), spaceAfter=6))
+        story.append(Paragraph(title, h2_style))
+        if value is not None:
+            story.append(Paragraph(value or '(vacío)', mono_style))
+        for i in issues:
+            story.append(Paragraph(i, issue_style))
+        story.append(Spacer(1, 0.2*cm))
+
+    section('📝 Título', d['title']['issues'], d['title']['text'])
+    section('📄 Meta Description', d['meta_description']['issues'], d['meta_description']['text'])
+
+    # Headings table
+    story.append(HRFlowable(width='100%', thickness=0.5, color=colors.HexColor('#E5E7EB'), spaceAfter=6))
+    story.append(Paragraph('🏗️ Headings', h2_style))
+    hd = d['headings']['headings']
+    h_data = [['H1','H2','H3','H4','H5','H6']]
+    max_rows = max(len(hd[f'h{i}']) for i in range(1,7)) or 1
+    for r in range(max_rows):
+        row = []
+        for i in range(1,7):
+            items = hd[f'h{i}']
+            row.append(Paragraph(items[r][:40] if r < len(items) else '—', ParagraphStyle('hc', fontName='Helvetica', fontSize=7, textColor=colors.HexColor('#374151'))))
+        h_data.append(row)
+    h_table = Table(h_data, colWidths=[2.8*cm]*6)
+    h_table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), DARK),
+        ('TEXTCOLOR', (0,0), (-1,0), GREEN),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0,0), (-1,0), 8),
+        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ('ROWBACKGROUNDS', (0,1), (-1,-1), [LIGHT, colors.white]),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#E5E7EB')),
+        ('PADDING', (0,0), (-1,-1), 6),
+    ]))
+    story.append(h_table)
+    for i in d['headings']['issues']:
+        story.append(Paragraph(i, issue_style))
+    story.append(Spacer(1, 0.3*cm))
+
+    # Images + links side by side
+    story.append(HRFlowable(width='100%', thickness=0.5, color=colors.HexColor('#E5E7EB'), spaceAfter=6))
+    img_text = [Paragraph('🖼️ Imágenes', h2_style)] + [Paragraph(i, issue_style) for i in d['images']['issues']]
+    lnk_text = [Paragraph('🔗 Enlazado', h2_style)] + [Paragraph(i, issue_style) for i in d['links']['issues']]
+    two_col = Table([[img_text, lnk_text]], colWidths=[8.5*cm, 8.5*cm])
+    two_col.setStyle(TableStyle([('VALIGN',(0,0),(-1,-1),'TOP'),('PADDING',(0,0),(-1,-1),0)]))
+    story.append(two_col)
+    story.append(Spacer(1, 0.3*cm))
+
+    section('🔧 SEO Técnico', d['technical']['issues'])
+    section('⚡ Performance del servidor', d['performance']['issues'])
+
+    # Open Graph
+    story.append(HRFlowable(width='100%', thickness=0.5, color=colors.HexColor('#E5E7EB'), spaceAfter=6))
+    story.append(Paragraph('📱 Open Graph', h2_style))
+    og = d['open_graph']['og']
+    if og:
+        og_rows = [[Paragraph(f'<font color="#00E5A0"><b>{k}</b></font>', ParagraphStyle('ogk', fontName='Helvetica-Bold', fontSize=7)),
+                    Paragraph(v[:80], ParagraphStyle('ogv', fontName='Helvetica', fontSize=7, textColor=colors.HexColor('#374151')))]
+                   for k,v in list(og.items())[:8]]
+        og_table = Table(og_rows, colWidths=[4*cm, 13*cm])
+        og_table.setStyle(TableStyle([
+            ('ROWBACKGROUNDS', (0,0), (-1,-1), [LIGHT, colors.white]),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#E5E7EB')),
+            ('PADDING', (0,0), (-1,-1), 5),
+        ]))
+        story.append(og_table)
+    for i in d['open_graph']['issues']:
+        story.append(Paragraph(i, issue_style))
+
+    story.append(Spacer(1, 0.6*cm))
+    story.append(HRFlowable(width='100%', thickness=0.5, color=GREEN))
+    story.append(Spacer(1, 0.2*cm))
+    story.append(Paragraph('SEO Analyzer · Alberto Labarta Holgado · github.com/Albertini97 · soyalbertolabartaholgado@gmail.com', footer_style))
+
+    doc.build(story)
+    buf.seek(0)
+    return buf.read()
+
 def build_pdf_html(d):
     score_color = "#00E5A0" if d["score"] >= 80 else "#FBBF24" if d["score"] >= 60 else "#EF4444"
     now = datetime.now().strftime("%d/%m/%Y %H:%M")
@@ -408,8 +579,7 @@ def analyze():
 def export_pdf():
     d = request.get_json()
     try:
-        html_content = build_pdf_html(d)
-        pdf = WeasyprintHTML(string=html_content).write_pdf()
+        pdf = build_pdf_reportlab(d)
         domain = urlparse(d.get("url", "")).netloc.replace("www.", "")
         filename = f"seo-report-{domain}.pdf"
         return Response(pdf, mimetype="application/pdf",
