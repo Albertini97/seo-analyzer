@@ -30,8 +30,8 @@ header{padding:1.2rem 3rem;border-bottom:1px solid var(--border);display:flex;ju
 .history-btn:hover{border-color:var(--purple);color:var(--purple)}
 
 /* HERO */
-.hero{padding:4rem 3rem 3rem;text-align:center;position:relative;overflow:hidden}
-.hero-grid{position:absolute;inset:0;background-image:linear-gradient(rgba(0,229,160,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(0,229,160,0.03) 1px,transparent 1px);background-size:50px 50px;mask-image:radial-gradient(ellipse 70% 80% at 50% 50%,black,transparent)}
+.hero{padding:4rem 3rem 3rem;text-align:center;position:relative;overflow:hidden;z-index:1}
+.hero-grid{position:absolute;inset:0;background-image:linear-gradient(rgba(0,229,160,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(0,229,160,0.03) 1px,transparent 1px);background-size:50px 50px;mask-image:radial-gradient(ellipse 70% 80% at 50% 50%,black,transparent);pointer-events:none;z-index:0}
 .hero h1{font-weight:800;font-size:clamp(2rem,5vw,3.5rem);line-height:1;letter-spacing:-0.03em;margin-bottom:0.75rem;position:relative}
 .hero h1 span{color:var(--green)}
 .hero-sub{font-size:1rem;color:var(--muted2);font-weight:300;margin-bottom:2.5rem;position:relative}
@@ -43,10 +43,10 @@ header{padding:1.2rem 3rem;border-bottom:1px solid var(--border);display:flex;ju
 
 /* FORM */
 .search-box{max-width:700px;margin:0 auto}
-.search-inner{display:flex;gap:0;border:1px solid var(--border);background:var(--surface);transition:border-color 0.2s}
+.search-inner{display:flex;gap:0;border:1px solid var(--border);background:var(--surface);transition:border-color 0.2s;position:relative;z-index:50}
 .search-inner:focus-within{border-color:var(--green)}
-.url-prefix{font-family:'Space Mono',monospace;font-size:0.72rem;color:var(--muted);padding:0 1rem;display:flex;align-items:center;border-right:1px solid var(--border);white-space:nowrap}
-input.url-input{flex:1;background:transparent;border:none;outline:none;color:var(--white);font-family:'Space Mono',monospace;font-size:0.82rem;padding:1rem}
+.url-prefix{font-family:'Space Mono',monospace;font-size:0.72rem;color:var(--muted);padding:0 1rem;display:flex;align-items:center;border-right:1px solid var(--border);white-space:nowrap;user-select:none}
+input.url-input{flex:1;background:transparent;border:none;outline:none;color:var(--white);font-family:'Space Mono',monospace;font-size:0.82rem;padding:1rem;cursor:text;position:relative;z-index:51}
 input.url-input::placeholder{color:var(--muted)}
 .analyze-btn{font-family:'Space Mono',monospace;font-size:0.72rem;padding:0 1.6rem;background:var(--green);color:#060810;border:none;cursor:pointer;font-weight:700;letter-spacing:0.05em;white-space:nowrap;transition:opacity 0.2s}
 .analyze-btn:hover{opacity:0.85}
