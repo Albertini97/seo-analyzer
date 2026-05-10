@@ -11,7 +11,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable, PageBreak, KeepTogether
 from reportlab.lib.enums import TA_LEFT, TA_CENTER
 
 app = Flask(__name__)
@@ -261,76 +261,433 @@ def compute_score(results):
     return max(score, 0), deductions
 
 def build_pdf_reportlab(d):
-    buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4,
-                            leftMargin=2*cm, rightMargin=2*cm,
-                            topMargin=2*cm, bottomMargin=2*cm)
+    from reportlab.platypus import PageBreak, KeepTogether
+    from reportlab.lib.units import mm
+    from reportlab.pdfgen import canvas as pdfcanvas
 
-    GREEN = colors.HexColor('#00E5A0')
-    RED   = colors.HexColor('#EF4444')
-    YELLOW= colors.HexColor('#FBBF24')
-    DARK  = colors.HexColor('#0D1017')
-    GRAY  = colors.HexColor('#6B7A94')
-    LIGHT = colors.HexColor('#F3F4F6')
+    buf = io.BytesIO()
+    PAGE_W, PAGE_H = A4
+
+    GREEN  = colors.HexColor('#00C48C')
+    RED    = colors.HexColor('#EF4444')
+    YELLOW = colors.HexColor('#F59E0B')
+    DARK   = colors.HexColor('#0D1017')
+    DARK2  = colors.HexColor('#1E2433')
+    GRAY   = colors.HexColor('#6B7A94')
+    LGRAY  = colors.HexColor('#9CA3AF')
+    LIGHT  = colors.HexColor('#F3F4F6')
+    WHITE  = colors.white
+    BORDER = colors.HexColor('#E5E7EB')
 
     score_color = GREEN if d['score'] >= 80 else YELLOW if d['score'] >= 60 else RED
+    score_label = 'Buen SEO' if d['score'] >= 80 else 'SEO mejorable' if d['score'] >= 60 else 'SEO deficiente'
+    now = datetime.now().strftime("%d/%m/%Y a las %H:%M")
+    domain = urlparse(d['url']).netloc
 
-    styles = getSampleStyleSheet()
-    title_style   = ParagraphStyle('title',   fontName='Helvetica-Bold', fontSize=18, textColor=GREEN,   spaceAfter=4)
-    sub_style     = ParagraphStyle('sub',     fontName='Helvetica',      fontSize=9,  textColor=GRAY,    spaceAfter=2)
-    h2_style      = ParagraphStyle('h2',      fontName='Helvetica-Bold', fontSize=11, textColor=DARK,    spaceBefore=10, spaceAfter=4)
-    body_style    = ParagraphStyle('body',    fontName='Helvetica',      fontSize=8,  textColor=colors.HexColor('#374151'), spaceAfter=3, leading=12)
-    mono_style    = ParagraphStyle('mono',    fontName='Courier',        fontSize=8,  textColor=DARK,    spaceAfter=3, backColor=LIGHT, borderPad=4)
-    issue_style   = ParagraphStyle('issue',   fontName='Helvetica',      fontSize=8,  textColor=colors.HexColor('#374151'), spaceAfter=2, leading=11)
-    footer_style  = ParagraphStyle('footer',  fontName='Helvetica',      fontSize=7,  textColor=GRAY,    alignment=TA_CENTER)
+    # ── Styles ──────────────────────────────────────────────────
+    cover_title  = ParagraphStyle('ct',  fontName='Helvetica-Bold', fontSize=32, textColor=WHITE,   leading=36, spaceAfter=8)
+    cover_sub    = ParagraphStyle('cs',  fontName='Helvetica',      fontSize=11, textColor=LGRAY,   leading=16, spaceAfter=4)
+    cover_url    = ParagraphStyle('cu',  fontName='Courier-Bold',   fontSize=10, textColor=GREEN,   spaceAfter=4)
+    cover_date   = ParagraphStyle('cd',  fontName='Helvetica',      fontSize=9,  textColor=LGRAY)
+    h1_style     = ParagraphStyle('h1',  fontName='Helvetica-Bold', fontSize=13, textColor=DARK,    spaceBefore=14, spaceAfter=5)
+    h2_style     = ParagraphStyle('h2',  fontName='Helvetica-Bold', fontSize=10, textColor=DARK,    spaceBefore=8,  spaceAfter=3)
+    body_style   = ParagraphStyle('bd',  fontName='Helvetica',      fontSize=8,  textColor=colors.HexColor('#374151'), leading=12, spaceAfter=2)
+    mono_style   = ParagraphStyle('mn',  fontName='Courier',        fontSize=8,  textColor=DARK,    backColor=LIGHT, leading=12, spaceAfter=4, leftIndent=6, rightIndent=6)
+    issue_ok     = ParagraphStyle('iok', fontName='Helvetica',      fontSize=8,  textColor=colors.HexColor('#065F46'), leading=12, spaceAfter=2)
+    issue_warn   = ParagraphStyle('iw',  fontName='Helvetica',      fontSize=8,  textColor=colors.HexColor('#92400E'), leading=12, spaceAfter=2)
+    issue_err    = ParagraphStyle('ie',  fontName='Helvetica',      fontSize=8,  textColor=colors.HexColor('#991B1B'), leading=12, spaceAfter=2)
+    issue_info   = ParagraphStyle('ii',  fontName='Helvetica',      fontSize=8,  textColor=GRAY,    leading=12, spaceAfter=2)
+    footer_style = ParagraphStyle('ft',  fontName='Helvetica',      fontSize=7,  textColor=LGRAY,   alignment=TA_CENTER)
+    label_style  = ParagraphStyle('lb',  fontName='Helvetica-Bold', fontSize=7,  textColor=GRAY,    spaceAfter=1)
+    val_style    = ParagraphStyle('vl',  fontName='Helvetica-Bold', fontSize=18, textColor=DARK,    leading=20)
+
+    def issue_para(text):
+        t = text.strip()
+        if t.startswith('[OK]') or t.startswith('OK'):
+            st = issue_ok
+        elif t.startswith('[!]') or t.startswith('AVISO') or t.startswith('WARN'):
+            st = issue_warn
+        elif t.startswith('[X]') or t.startswith('ERROR'):
+            st = issue_err
+        else:
+            st = issue_info
+        # limpia emojis básicos y los reemplaza por texto
+        replacements = [
+            ('✅','[OK]'),('⚠️','[!]'),('❌','[X]'),('ℹ️','[i]'),
+            ('🔍',''),('📝',''),('📄',''),('🏗️',''),('🖼️',''),
+            ('🔗',''),('🔧',''),('⚡',''),('📱',''),('→','->'),
+        ]
+        for emoji, txt in replacements:
+            t = t.replace(emoji, txt)
+        if '[OK]' in t: st = issue_ok
+        elif '[!]' in t: st = issue_warn
+        elif '[X]' in t: st = issue_err
+        return Paragraph(t, st)
+
+    def clean(text):
+        replacements = [
+            ('✅','[OK]'),('⚠️','[!]'),('❌','[X]'),('ℹ️','[i]'),
+            ('🔍','SEO'),('📝',''),('📄',''),('🏗️',''),('🖼️',''),
+            ('🔗',''),('🔧',''),('⚡',''),('📱',''),
+        ]
+        for e, r in replacements:
+            text = text.replace(e, r)
+        return text.strip()
+
+    def bar_table(label, value_pct, color, width=17*cm):
+        bar_w = width
+        filled = max(0.01, min(value_pct/100, 1)) * bar_w
+        empty  = bar_w - filled
+        data = [[
+            Paragraph(label, label_style),
+            Paragraph(f'{value_pct}%' if value_pct <= 100 else label, label_style)
+        ]]
+        t = Table(data, colWidths=[bar_w*0.7, bar_w*0.3])
+        t.setStyle(TableStyle([
+            ('ALIGN',(1,0),(1,0),'RIGHT'),
+            ('PADDING',(0,0),(-1,-1),0),
+            ('BOTTOMPADDING',(0,0),(-1,-1),2),
+        ]))
+        bar_data = [['','']]
+        bar = Table(bar_data, colWidths=[filled, max(empty,0.1)])
+        bar.setStyle(TableStyle([
+            ('BACKGROUND',(0,0),(0,0),color),
+            ('BACKGROUND',(1,0),(1,0),BORDER),
+            ('ROWHEIGHT',(0,0),(-1,-1),6),
+            ('PADDING',(0,0),(-1,-1),0),
+        ]))
+        wrapper = Table([[t],[bar]], colWidths=[bar_w])
+        wrapper.setStyle(TableStyle([
+            ('PADDING',(0,0),(-1,-1),0),
+            ('BOTTOMPADDING',(0,0),(-1,-1),6),
+        ]))
+        return wrapper
+
+    # ── Page template with footer ────────────────────────────────
+    class FooterCanvas(pdfcanvas.Canvas):
+        def __init__(self, *args, **kwargs):
+            pdfcanvas.Canvas.__init__(self, *args, **kwargs)
+            self._saved_page_states = []
+
+        def showPage(self):
+            self._saved_page_states.append(dict(self.__dict__))
+            self._startPage()
+
+        def save(self):
+            num_pages = len(self._saved_page_states)
+            for i, state in enumerate(self._saved_page_states):
+                self.__dict__.update(state)
+                if i > 0:  # skip cover
+                    self.draw_footer(i, num_pages)
+                self.canvas_showPage()
+            pdfcanvas.Canvas.save(self)
+
+        def canvas_showPage(self):
+            pdfcanvas.Canvas.showPage(self)
+
+        def draw_footer(self, page_num, total):
+            self.saveState()
+            self.setFont('Helvetica', 7)
+            self.setFillColor(LGRAY)
+            self.drawString(2*cm, 1.2*cm, f'SEO Analyzer · Alberto Labarta Holgado · github.com/Albertini97')
+            self.drawRightString(PAGE_W - 2*cm, 1.2*cm, f'Pagina {page_num} de {total}')
+            self.setStrokeColor(BORDER)
+            self.setLineWidth(0.5)
+            self.line(2*cm, 1.5*cm, PAGE_W - 2*cm, 1.5*cm)
+            self.restoreState()
+
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        leftMargin=2*cm, rightMargin=2*cm,
+        topMargin=2*cm, bottomMargin=2.5*cm,
+        title=f'SEO Report - {domain}',
+        author='Alberto Labarta Holgado'
+    )
 
     story = []
-    now = datetime.now().strftime("%d/%m/%Y %H:%M")
 
-    # Header table
-    header_data = [[
-        Paragraph('🔍 SEO Analyzer Report', title_style),
-        Paragraph(f'Generado: {now}<br/>by Alberto Labarta · github.com/Albertini97', sub_style)
+    # ══════════════════════════════════════════════════════════════
+    # PORTADA
+    # ══════════════════════════════════════════════════════════════
+    story.append(Spacer(1, 3*cm))
+
+    # Fondo oscuro simulado con tabla
+    cover_data = [[
+        Paragraph('SEO Analyzer', ParagraphStyle('cta', fontName='Helvetica-Bold', fontSize=10, textColor=GREEN, spaceAfter=16)),
     ]]
-    header_table = Table(header_data, colWidths=[10*cm, 7*cm])
-    header_table.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,-1), DARK),
-        ('PADDING', (0,0), (-1,-1), 12),
+    story.append(Spacer(1, 0.5*cm))
+    story.append(Paragraph('Informe de Auditoria SEO', cover_title))
+    story.append(Spacer(1, 0.3*cm))
+    story.append(Paragraph(domain, cover_url))
+    story.append(Paragraph(d['url'], ParagraphStyle('fullurl', fontName='Courier', fontSize=8, textColor=LGRAY, spaceAfter=12)))
+    story.append(Spacer(1, 1*cm))
+
+    # Score grande en portada
+    sc_label_color = colors.HexColor('#065F46') if d['score'] >= 80 else colors.HexColor('#92400E') if d['score'] >= 60 else colors.HexColor('#991B1B')
+    sc_bg = colors.HexColor('#ECFDF5') if d['score'] >= 80 else colors.HexColor('#FFFBEB') if d['score'] >= 60 else colors.HexColor('#FEF2F2')
+
+    cover_score_data = [[
+        Paragraph(str(d['score']), ParagraphStyle('csn', fontName='Helvetica-Bold', fontSize=72, textColor=score_color, leading=72)),
+        [
+            Paragraph('/ 100', ParagraphStyle('csub', fontName='Helvetica', fontSize=14, textColor=LGRAY, spaceAfter=6)),
+            Paragraph(score_label, ParagraphStyle('csl', fontName='Helvetica-Bold', fontSize=16, textColor=score_color, spaceAfter=8)),
+            Paragraph(f'Generado el {now}', ParagraphStyle('csd', fontName='Helvetica', fontSize=9, textColor=LGRAY)),
+        ]
+    ]]
+    cover_score_table = Table(cover_score_data, colWidths=[5*cm, 12*cm])
+    cover_score_table.setStyle(TableStyle([
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('ALIGN', (1,0), (1,0), 'RIGHT'),
+        ('BACKGROUND', (0,0), (-1,-1), sc_bg),
+        ('BOX', (0,0), (-1,-1), 2, score_color),
+        ('LEFTPADDING', (0,0), (0,0), 20),
+        ('PADDING', (1,0), (1,0), 16),
+        ('LINEAFTER', (0,0), (0,0), 2, score_color),
     ]))
-    story.append(header_table)
+    story.append(cover_score_table)
+    story.append(Spacer(1, 1.5*cm))
+
+    # Penalizaciones en portada
+    if d['deductions']:
+        story.append(Paragraph('Penalizaciones detectadas', ParagraphStyle('ped', fontName='Helvetica-Bold', fontSize=9, textColor=RED, spaceAfter=6)))
+        ded_rows = [[Paragraph(f'- {clean(x)}', ParagraphStyle('dr', fontName='Helvetica', fontSize=8, textColor=colors.HexColor('#991B1B')))] for x in d['deductions']]
+        ded_table = Table(ded_rows, colWidths=[17*cm])
+        ded_table.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#FEF2F2')),
+            ('LEFTPADDING', (0,0), (-1,-1), 10),
+            ('PADDING', (0,0), (-1,-1), 4),
+            ('BOX', (0,0), (-1,-1), 0.5, RED),
+        ]))
+        story.append(ded_table)
+
+    story.append(Spacer(1, 2*cm))
+    story.append(Paragraph('Alberto Labarta Holgado · Full Stack Developer & SEO Specialist', ParagraphStyle('auth', fontName='Helvetica', fontSize=8, textColor=LGRAY)))
+    story.append(Paragraph('github.com/Albertini97 · soyalbertolabartaholgado@gmail.com', ParagraphStyle('auth2', fontName='Helvetica', fontSize=8, textColor=LGRAY)))
+
+    story.append(PageBreak())
+
+    # ══════════════════════════════════════════════════════════════
+    # RESUMEN EJECUTIVO
+    # ══════════════════════════════════════════════════════════════
+    story.append(Paragraph('Resumen ejecutivo', h1_style))
+    story.append(HRFlowable(width='100%', thickness=1.5, color=GREEN, spaceAfter=10))
+
+    # Genera resumen automático
+    issues_found = []
+    positives = []
+
+    if not d['title']['text']:
+        issues_found.append('La pagina no tiene etiqueta de titulo, lo que perjudica gravemente el posicionamiento.')
+    elif d['title']['length'] < 30 or d['title']['length'] > 60:
+        issues_found.append(f'El titulo tiene {d["title"]["length"]} caracteres, fuera del rango optimo (30-60). Ajustarlo puede mejorar el CTR en Google.')
+    else:
+        positives.append('El titulo tiene una longitud optima.')
+
+    if not d['meta_description']['text']:
+        issues_found.append('No hay meta description. Google puede generar una automatica, pero es mejor definirla para controlar como aparece en resultados.')
+    elif d['meta_description']['length'] < 70 or d['meta_description']['length'] > 160:
+        issues_found.append(f'La meta description tiene {d["meta_description"]["length"]} caracteres, fuera del rango optimo (70-160).')
+    else:
+        positives.append('La meta description tiene una longitud correcta.')
+
+    h1s = d['headings']['headings']['h1']
+    if not h1s:
+        issues_found.append('No hay H1 en la pagina. Es uno de los factores SEO on-page mas importantes.')
+    elif len(h1s) > 1:
+        issues_found.append(f'Hay {len(h1s)} etiquetas H1. Se recomienda usar solo una por pagina.')
+    else:
+        positives.append('La estructura de H1 es correcta.')
+
+    if not d['technical']['canonical']:
+        issues_found.append('Falta la URL canonica (rel=canonical), lo que puede generar contenido duplicado.')
+    else:
+        positives.append('La URL canonica esta correctamente definida.')
+
+    if not d['technical']['https']:
+        issues_found.append('La pagina no usa HTTPS, lo que implica penalizacion en rankings y perdida de confianza del usuario.')
+    else:
+        positives.append('La pagina usa HTTPS correctamente.')
+
+    if d['images']['without_alt'] > 0:
+        issues_found.append(f'Hay {d["images"]["without_alt"]} imagen(es) sin atributo alt, lo que perjudica accesibilidad y SEO de imagenes.')
+
+    if d['performance']['load_time'] > 4:
+        issues_found.append(f'El tiempo de respuesta del servidor es {d["performance"]["load_time"]}s, demasiado alto. Afecta al ranking y a la experiencia de usuario.')
+    elif d['performance']['load_time'] < 1.5:
+        positives.append(f'Excelente tiempo de respuesta del servidor: {d["performance"]["load_time"]}s.')
+
+    if positives:
+        story.append(Paragraph('Puntos fuertes', ParagraphStyle('pf', fontName='Helvetica-Bold', fontSize=9, textColor=colors.HexColor('#065F46'), spaceAfter=5)))
+        pos_rows = [[Paragraph(f'+ {p}', ParagraphStyle('pr', fontName='Helvetica', fontSize=8, textColor=colors.HexColor('#065F46')))] for p in positives]
+        pos_table = Table(pos_rows, colWidths=[17*cm])
+        pos_table.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#ECFDF5')),
+            ('LEFTPADDING', (0,0), (-1,-1), 10),
+            ('PADDING', (0,0), (-1,-1), 4),
+            ('BOX', (0,0), (-1,-1), 0.5, GREEN),
+        ]))
+        story.append(pos_table)
+        story.append(Spacer(1, 0.4*cm))
+
+    if issues_found:
+        story.append(Paragraph('Puntos a mejorar', ParagraphStyle('pm', fontName='Helvetica-Bold', fontSize=9, textColor=colors.HexColor('#991B1B'), spaceAfter=5)))
+        iss_rows = [[Paragraph(f'- {i}', ParagraphStyle('ir', fontName='Helvetica', fontSize=8, textColor=colors.HexColor('#991B1B')))] for i in issues_found]
+        iss_table = Table(iss_rows, colWidths=[17*cm])
+        iss_table.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#FEF2F2')),
+            ('LEFTPADDING', (0,0), (-1,-1), 10),
+            ('PADDING', (0,0), (-1,-1), 4),
+            ('BOX', (0,0), (-1,-1), 0.5, RED),
+        ]))
+        story.append(iss_table)
+
+    story.append(Spacer(1, 0.5*cm))
+
+    # Barras de puntuacion visual
+    story.append(Paragraph('Puntuacion por areas', h2_style))
+    story.append(HRFlowable(width='100%', thickness=0.5, color=BORDER, spaceAfter=8))
+
+    def area_score(issues_list):
+        ok = sum(1 for i in issues_list if '✅' in i or '[OK]' in i)
+        total = len(issues_list)
+        return int((ok / total) * 100) if total else 50
+
+    areas = [
+        ('Titulo y meta tags', area_score(d['title']['issues'] + d['meta_description']['issues']), GREEN),
+        ('Estructura de headings', area_score(d['headings']['issues']), GREEN),
+        ('SEO tecnico', area_score(d['technical']['issues']), GREEN),
+        ('Imagenes', area_score(d['images']['issues']), GREEN),
+        ('Performance', area_score(d['performance']['issues']), GREEN),
+    ]
+    for label, pct, color in areas:
+        c = GREEN if pct >= 75 else YELLOW if pct >= 50 else RED
+        story.append(bar_table(label, pct, c))
+
+    story.append(PageBreak())
+
+    # ══════════════════════════════════════════════════════════════
+    # ANALISIS DETALLADO
+    # ══════════════════════════════════════════════════════════════
+    story.append(Paragraph('Analisis detallado', h1_style))
+    story.append(HRFlowable(width='100%', thickness=1.5, color=GREEN, spaceAfter=10))
+
+    def section(title, issues, value=None):
+        items = [
+            HRFlowable(width='100%', thickness=0.5, color=BORDER, spaceAfter=4),
+            Paragraph(title, h2_style),
+        ]
+        if value is not None:
+            v = clean(value) if value else '(sin valor)'
+            items.append(Paragraph(v, mono_style))
+        for i in issues:
+            items.append(issue_para(i))
+        items.append(Spacer(1, 0.3*cm))
+        story.append(KeepTogether(items))
+
+    section('Titulo de pagina', d['title']['issues'], d['title']['text'])
+    section('Meta Description', d['meta_description']['issues'], d['meta_description']['text'])
+
+    # Headings
+    story.append(HRFlowable(width='100%', thickness=0.5, color=BORDER, spaceAfter=4))
+    story.append(Paragraph('Estructura de Headings', h2_style))
+    hd = d['headings']['headings']
+    h_data = [['H1','H2','H3','H4','H5','H6']]
+    max_rows = min(max(len(hd[f'h{i}']) for i in range(1,7)), 5) or 1
+    for r in range(max_rows):
+        row = []
+        for i in range(1,7):
+            items = hd[f'h{i}']
+            txt = clean(items[r][:35]) if r < len(items) else '-'
+            row.append(Paragraph(txt, ParagraphStyle('hc', fontName='Helvetica', fontSize=7, textColor=colors.HexColor('#374151'))))
+        h_data.append(row)
+    h_table = Table(h_data, colWidths=[2.8*cm]*6)
+    h_table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), DARK),
+        ('TEXTCOLOR', (0,0), (-1,0), GREEN),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0,0), (-1,-1), 7),
+        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ('ROWBACKGROUNDS', (0,1), (-1,-1), [LIGHT, WHITE]),
+        ('GRID', (0,0), (-1,-1), 0.5, BORDER),
+        ('PADDING', (0,0), (-1,-1), 5),
+    ]))
+    story.append(h_table)
+    for i in d['headings']['issues']:
+        story.append(issue_para(i))
     story.append(Spacer(1, 0.4*cm))
 
-    # Score box
-    score_label = '✅ Buen SEO' if d['score'] >= 80 else '⚠️ SEO mejorable' if d['score'] >= 60 else '❌ SEO deficiente'
-    ded_text = '  ·  '.join(d['deductions']) if d['deductions'] else 'Sin penalizaciones'
-    score_data = [[
-        Paragraph(f'<font size=28><b>{d["score"]}</b></font><font size=10 color="#6B7A94"> / 100</font>', ParagraphStyle('sc', fontName='Helvetica-Bold', fontSize=28, textColor=score_color)),
-        [Paragraph(f'<b>{score_label}</b>', ParagraphStyle('sl', fontName='Helvetica-Bold', fontSize=12, textColor=score_color, spaceAfter=4)),
-         Paragraph(d['url'], ParagraphStyle('su', fontName='Courier', fontSize=7, textColor=GRAY, spaceAfter=6)),
-         Paragraph(ded_text, ParagraphStyle('sd', fontName='Helvetica', fontSize=7, textColor=RED))]
-    ]]
-    score_table = Table(score_data, colWidths=[3.5*cm, 13.5*cm])
-    score_table.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,-1), LIGHT),
-        ('LEFTPADDING', (0,0), (0,0), 16),
-        ('PADDING', (1,0), (1,0), 12),
-        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('LINEAFTER', (0,0), (0,0), 1, score_color),
-        ('BOX', (0,0), (-1,-1), 0.5, score_color),
-    ]))
-    story.append(score_table)
-    story.append(Spacer(1, 0.5*cm))
+    # Imagenes + Links en 2 columnas
+    story.append(HRFlowable(width='100%', thickness=0.5, color=BORDER, spaceAfter=4))
+    img_items = [Paragraph('Imagenes', h2_style)] + [issue_para(i) for i in d['images']['issues']]
+    lnk_items = [Paragraph('Enlazado', h2_style)] + [issue_para(i) for i in d['links']['issues']]
+
+    # Stats imagenes
+    img_stats = Table(
+        [[Paragraph(str(d['images']['total']), val_style), Paragraph(str(d['images']['without_alt']), ParagraphStyle('vs2', fontName='Helvetica-Bold', fontSize=18, textColor=RED if d['images']['without_alt']>0 else GREEN)), Paragraph(str(d['images']['empty_alt']), ParagraphStyle('vs3', fontName='Helvetica-Bold', fontSize=18, textColor=YELLOW if d['images']['empty_alt']>0 else GREEN))],
+         [Paragraph('Total', label_style), Paragraph('Sin alt', label_style), Paragraph('Alt vacio', label_style)]],
+        colWidths=[2.5*cm]*3
+    )
+    img_stats.setStyle(TableStyle([('ALIGN',(0,0),(-1,-1),'CENTER'),('PADDING',(0,0),(-1,-1),2)]))
+
+    lnk_stats = Table(
+        [[Paragraph(str(d['links']['internal_count']), val_style), Paragraph(str(d['links']['external_count']), val_style), Paragraph(str(d['links']['nofollow_count']), val_style)],
+         [Paragraph('Internos', label_style), Paragraph('Externos', label_style), Paragraph('Nofollow', label_style)]],
+        colWidths=[2.5*cm]*3
+    )
+    lnk_stats.setStyle(TableStyle([('ALIGN',(0,0),(-1,-1),'CENTER'),('PADDING',(0,0),(-1,-1),2)]))
+
+    two_col = Table([[img_items + [img_stats], lnk_items + [lnk_stats]]], colWidths=[8.5*cm, 8.5*cm])
+    two_col.setStyle(TableStyle([('VALIGN',(0,0),(-1,-1),'TOP'),('PADDING',(0,0),(-1,-1),0),('RIGHTPADDING',(0,0),(0,-1),12)]))
+    story.append(two_col)
+    story.append(Spacer(1, 0.3*cm))
+
+    section('SEO Tecnico', d['technical']['issues'])
+
+    # Performance con barras
+    story.append(HRFlowable(width='100%', thickness=0.5, color=BORDER, spaceAfter=4))
+    story.append(Paragraph('Performance del servidor', h2_style))
+    lt = d['performance']['load_time']
+    sz = d['performance']['size_kb']
+    lt_color = GREEN if lt < 1.5 else YELLOW if lt < 3 else RED
+    sz_color = GREEN if sz < 200 else YELLOW if sz < 500 else RED
+    lt_pct = max(0, min(100, int((1 - lt/6) * 100)))
+    sz_pct = max(0, min(100, int((1 - sz/2000) * 100)))
+    story.append(bar_table(f'Tiempo de respuesta: {lt}s', lt_pct, lt_color))
+    story.append(bar_table(f'Tamano HTML: {sz} KB', sz_pct, sz_color))
+    for i in d['performance']['issues']:
+        story.append(issue_para(i))
+    story.append(Spacer(1, 0.3*cm))
+
+    # Open Graph
+    story.append(HRFlowable(width='100%', thickness=0.5, color=BORDER, spaceAfter=4))
+    story.append(Paragraph('Open Graph y Social', h2_style))
+    og = d['open_graph']['og']
+    if og:
+        og_rows = [
+            [Paragraph(k, ParagraphStyle('ogk', fontName='Helvetica-Bold', fontSize=7, textColor=GREEN)),
+             Paragraph(clean(v[:90]), ParagraphStyle('ogv', fontName='Helvetica', fontSize=7, textColor=colors.HexColor('#374151')))]
+            for k,v in list(og.items())[:8]
+        ]
+        og_table = Table(og_rows, colWidths=[4*cm, 13*cm])
+        og_table.setStyle(TableStyle([
+            ('ROWBACKGROUNDS', (0,0), (-1,-1), [LIGHT, WHITE]),
+            ('GRID', (0,0), (-1,-1), 0.5, BORDER),
+            ('PADDING', (0,0), (-1,-1), 5),
+        ]))
+        story.append(og_table)
+        story.append(Spacer(1, 0.3*cm))
+    for i in d['open_graph']['issues']:
+        story.append(issue_para(i))
 
     # PageSpeed
     ps = d.get('pagespeed', {})
-    if ps.get('available'):
-        story.append(Paragraph('⚡ Core Web Vitals · Google PageSpeed (móvil)', h2_style))
+    if ps.get('available') and ps.get('performance_score', 0) > 0:
+        story.append(Spacer(1, 0.4*cm))
+        story.append(HRFlowable(width='100%', thickness=0.5, color=BORDER, spaceAfter=4))
+        story.append(Paragraph('Core Web Vitals - Google PageSpeed (movil)', h2_style))
         cwv_data = [
             ['Performance', 'SEO Score', 'Accesibilidad', 'LCP', 'TBT', 'CLS'],
             [str(ps['performance_score']), str(ps['seo_score']), str(ps['accessibility_score']),
-             ps['lcp'], ps['tbt'], ps['cls']]
+             clean(ps['lcp']), clean(ps['tbt']), clean(ps['cls'])]
         ]
         cwv_table = Table(cwv_data, colWidths=[2.8*cm]*6)
         cwv_table.setStyle(TableStyle([
@@ -340,89 +697,21 @@ def build_pdf_reportlab(d):
             ('FONTSIZE', (0,0), (-1,-1), 8),
             ('ALIGN', (0,0), (-1,-1), 'CENTER'),
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-            ('ROWBACKGROUNDS', (0,1), (-1,-1), [LIGHT, colors.white]),
-            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#E5E7EB')),
+            ('ROWBACKGROUNDS', (0,1), (-1,-1), [LIGHT, WHITE]),
+            ('GRID', (0,0), (-1,-1), 0.5, BORDER),
             ('PADDING', (0,0), (-1,-1), 8),
         ]))
         story.append(cwv_table)
-        story.append(Spacer(1, 0.4*cm))
+    elif ps.get('available') and ps.get('performance_score', 0) == 0:
+        story.append(Spacer(1, 0.3*cm))
+        story.append(Paragraph('[i] Core Web Vitals no disponibles: limite de la API de Google alcanzado. Activa una API key gratuita en console.cloud.google.com para obtener datos reales.', issue_info))
 
-    def section(title, issues, value=None):
-        story.append(HRFlowable(width='100%', thickness=0.5, color=colors.HexColor('#E5E7EB'), spaceAfter=6))
-        story.append(Paragraph(title, h2_style))
-        if value is not None:
-            story.append(Paragraph(value or '(vacío)', mono_style))
-        for i in issues:
-            story.append(Paragraph(i, issue_style))
-        story.append(Spacer(1, 0.2*cm))
-
-    section('📝 Título', d['title']['issues'], d['title']['text'])
-    section('📄 Meta Description', d['meta_description']['issues'], d['meta_description']['text'])
-
-    # Headings table
-    story.append(HRFlowable(width='100%', thickness=0.5, color=colors.HexColor('#E5E7EB'), spaceAfter=6))
-    story.append(Paragraph('🏗️ Headings', h2_style))
-    hd = d['headings']['headings']
-    h_data = [['H1','H2','H3','H4','H5','H6']]
-    max_rows = max(len(hd[f'h{i}']) for i in range(1,7)) or 1
-    for r in range(max_rows):
-        row = []
-        for i in range(1,7):
-            items = hd[f'h{i}']
-            row.append(Paragraph(items[r][:40] if r < len(items) else '—', ParagraphStyle('hc', fontName='Helvetica', fontSize=7, textColor=colors.HexColor('#374151'))))
-        h_data.append(row)
-    h_table = Table(h_data, colWidths=[2.8*cm]*6)
-    h_table.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,0), DARK),
-        ('TEXTCOLOR', (0,0), (-1,0), GREEN),
-        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0,0), (-1,0), 8),
-        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
-        ('ROWBACKGROUNDS', (0,1), (-1,-1), [LIGHT, colors.white]),
-        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#E5E7EB')),
-        ('PADDING', (0,0), (-1,-1), 6),
-    ]))
-    story.append(h_table)
-    for i in d['headings']['issues']:
-        story.append(Paragraph(i, issue_style))
-    story.append(Spacer(1, 0.3*cm))
-
-    # Images + links side by side
-    story.append(HRFlowable(width='100%', thickness=0.5, color=colors.HexColor('#E5E7EB'), spaceAfter=6))
-    img_text = [Paragraph('🖼️ Imágenes', h2_style)] + [Paragraph(i, issue_style) for i in d['images']['issues']]
-    lnk_text = [Paragraph('🔗 Enlazado', h2_style)] + [Paragraph(i, issue_style) for i in d['links']['issues']]
-    two_col = Table([[img_text, lnk_text]], colWidths=[8.5*cm, 8.5*cm])
-    two_col.setStyle(TableStyle([('VALIGN',(0,0),(-1,-1),'TOP'),('PADDING',(0,0),(-1,-1),0)]))
-    story.append(two_col)
-    story.append(Spacer(1, 0.3*cm))
-
-    section('🔧 SEO Técnico', d['technical']['issues'])
-    section('⚡ Performance del servidor', d['performance']['issues'])
-
-    # Open Graph
-    story.append(HRFlowable(width='100%', thickness=0.5, color=colors.HexColor('#E5E7EB'), spaceAfter=6))
-    story.append(Paragraph('📱 Open Graph', h2_style))
-    og = d['open_graph']['og']
-    if og:
-        og_rows = [[Paragraph(f'<font color="#00E5A0"><b>{k}</b></font>', ParagraphStyle('ogk', fontName='Helvetica-Bold', fontSize=7)),
-                    Paragraph(v[:80], ParagraphStyle('ogv', fontName='Helvetica', fontSize=7, textColor=colors.HexColor('#374151')))]
-                   for k,v in list(og.items())[:8]]
-        og_table = Table(og_rows, colWidths=[4*cm, 13*cm])
-        og_table.setStyle(TableStyle([
-            ('ROWBACKGROUNDS', (0,0), (-1,-1), [LIGHT, colors.white]),
-            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#E5E7EB')),
-            ('PADDING', (0,0), (-1,-1), 5),
-        ]))
-        story.append(og_table)
-    for i in d['open_graph']['issues']:
-        story.append(Paragraph(i, issue_style))
-
-    story.append(Spacer(1, 0.6*cm))
-    story.append(HRFlowable(width='100%', thickness=0.5, color=GREEN))
+    story.append(Spacer(1, 0.5*cm))
+    story.append(HRFlowable(width='100%', thickness=0.5, color=BORDER))
     story.append(Spacer(1, 0.2*cm))
     story.append(Paragraph('SEO Analyzer · Alberto Labarta Holgado · github.com/Albertini97 · soyalbertolabartaholgado@gmail.com', footer_style))
 
-    doc.build(story)
+    doc.build(story, canvasmaker=FooterCanvas)
     buf.seek(0)
     return buf.read()
 
