@@ -21,7 +21,10 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; SEOAnalyzer/1.0; +https://github.com/Albertini97)"
 }
 
+import os
+
 PAGESPEED_API = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed"
+PAGESPEED_KEY = os.environ.get("PAGESPEED_KEY", "")
 
 def fetch_page(url):
     start = time.time()
@@ -33,6 +36,8 @@ def fetch_page(url):
 def fetch_pagespeed(url):
     try:
         params = {"url": url, "strategy": "mobile", "category": ["performance", "seo", "accessibility"]}
+        if PAGESPEED_KEY:
+            params["key"] = PAGESPEED_KEY
         resp = requests.get(PAGESPEED_API, params=params, timeout=30)
         data = resp.json()
         cats = data.get("lighthouseResult", {}).get("categories", {})
