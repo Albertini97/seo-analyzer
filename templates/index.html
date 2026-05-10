@@ -428,8 +428,18 @@ function loadFromHistory(url) {
 
 // ─── ANALYZE ──────────────────────────────────────────
 async function analyze() {
-  const url = document.getElementById('urlInput').value.trim();
+  let url = document.getElementById('urlInput').value.trim();
   if (!url) return;
+
+  // Limpiar parámetros de tracking comunes
+  try {
+    const parsed = new URL(url.startsWith('http') ? url : 'https://' + url);
+    const trackingParams = ['_su_rec_id','utm_source','utm_medium','utm_campaign','utm_term','utm_content','fbclid','gclid','ref','source'];
+    trackingParams.forEach(p => parsed.searchParams.delete(p));
+    url = parsed.toString();
+    document.getElementById('urlInput').value = url;
+  } catch(e) { /* si la URL no parsea bien, la dejamos tal cual */ }
+
   const includePS = document.getElementById('includePagespeed').checked;
   document.getElementById('analyzeBtn').disabled = true;
   showLoading(includePS);

@@ -28,7 +28,7 @@ PAGESPEED_KEY = os.environ.get("PAGESPEED_KEY", "")
 
 def fetch_page(url):
     start = time.time()
-    resp = requests.get(url, headers=HEADERS, timeout=15)
+    resp = requests.get(url, headers=HEADERS, timeout=20, allow_redirects=True, verify=True)
     load_time = round(time.time() - start, 2)
     resp.raise_for_status()
     return resp.text, load_time, len(resp.content)
