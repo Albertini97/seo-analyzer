@@ -228,6 +228,120 @@ def analyze_performance(load_time, page_size_bytes):
         issues.append(f"⚠️ Tamaño HTML: {size_kb} KB (considera optimizar)")
     return {"load_time": load_time, "size_kb": size_kb, "issues": issues}
 
+def analyze_keywords(soup, title, meta_desc):
+    stopwords = set(['de','la','el','en','y','a','los','las','un','una','por','con','del',
+                     'se','que','es','su','lo','al','para','como','pero','o','si','no','le',
+                     'the','and','of','to','in','is','it','that','this','for','on','are','at'])
+    for tag in soup.find_all(['script','style','nav','footer','header']):
+        tag.decompose()
+    text = soup.get_text(separator=' ', strip=True).lower()
+    words = re.findall(r'\b[a-záéíóúñüa-z]{4,}\b', text)
+    freq = {}
+    for w in words:
+        if w not in stopwords:
+            freq[w] = freq.get(w, 0) + 1
+    top_keywords = sorted(freq.items(), key=lambda x: x[1], reverse=True)[:10]
+    title_lower = title.lower()
+    meta_lower  = meta_desc.lower()
+    matches_title = [kw for kw, _ in top_keywords[:5] if kw in title_lower]
+    matches_meta  = [kw for kw, _ in top_keywords[:5] if kw in meta_lower]
+    issues = []
+    if matches_title:
+        issues.append(f"✅ Keywords del contenido presentes en el título: {', '.join(matches_title)}")
+    else:
+        issues.append("⚠️ Las palabras más frecuentes del contenido no aparecen en el título")
+    if matches_meta:
+        issues.append(f"✅ Keywords del contenido presentes en meta description: {', '.join(matches_meta)}")
+    else:
+        issues.append("⚠️ Las palabras más frecuentes del contenido no aparecen en la meta description")
+    return {"top_keywords": top_keywords, "matches_title": matches_title, "matches_meta": matches_meta, "issues": issues}
+
+def analyze_schema(soup):
+    import json as _json
+    issues = []
+    schemas_found = []
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = _json.loads(script.string or "{}")
+            schema_type = data.get("@type", "Desconocido")
+            if isinstance(schema_type, list):
+                schema_type = ", ".join(schema_type)
+            schemas_found.append({"type": schema_type, "format": "JSON-LD"})
+        except Exception:
+            pass
+    for m in soup.find_all(attrs={"itemtype": True}):
+        itype = m.get("itemtype", "")
+        schema_type = itype.split("/")[-1] if "/" in itype else itype
+        schemas_found.append({"type": schema_type, "format": "Microdata"})
+    if not schemas_found:
+        issues.append("⚠️ No se detectaron datos estructurados (Schema.org). Recomendado para rich snippets en Google")
+    else:
+        types = list(set(s['type'] for s in schemas_found))
+        issues.append(f"✅ {len(schemas_found)} schema(s) detectado(s): {', '.join(types[:5])}")
+        types_lower = [t.lower() for t in types]
+        if any(t in types_lower for t in ['organization','localbusiness','website']):
+            issues.append("✅ Schema de organización/negocio presente")
+        if any(t in types_lower for t in ['product','offer']):
+            issues.append("✅ Schema de producto presente")
+        if any(t in types_lower for t in ['breadcrumb','breadcrumblist']):
+            issues.append("✅ Breadcrumbs estructurados presentes")
+        if any(t in types_lower for t in ['faqpage','faq']):
+            issues.append("✅ Schema FAQ presente — puede generar rich snippets")
+    return {"schemas": schemas_found, "count": len(schemas_found), "issues": issues}
+
+def generate_recommendations(results):
+    recs = []
+    if not results["title"]["text"]:
+        recs.append({"priority":"CRITICO","area":"Titulo","problem":"No hay etiqueta title","action":"Añade una etiqueta <title> única de 30-60 caracteres con la keyword principal al inicio."})
+    elif results["title"]["length"] < 30:
+        recs.append({"priority":"IMPORTANTE","area":"Titulo","problem":f'Titulo corto ({results["title"]["length"]} chars)',"action":"Amplía el título a 30-60 caracteres. Incluye la keyword principal y el nombre de la marca."})
+    elif results["title"]["length"] > 60:
+        recs.append({"priority":"IMPORTANTE","area":"Titulo","problem":f'Titulo largo ({results["title"]["length"]} chars)',"action":"Reduce el título a menos de 60 caracteres. Google trunca el resto. Mantén la keyword principal al inicio."})
+    if not results["meta_description"]["text"]:
+        recs.append({"priority":"IMPORTANTE","area":"Meta Description","problem":"No hay meta description","action":"Escribe una meta description de 70-160 caracteres con una llamada a la acción clara."})
+    elif results["meta_description"]["length"] > 160:
+        recs.append({"priority":"MENOR","area":"Meta Description","problem":f'Meta description larga ({results["meta_description"]["length"]} chars)',"action":"Reduce a menos de 160 caracteres. Google la truncará de todas formas. Pon lo más importante al principio."})
+    elif results["meta_description"]["length"] < 70:
+        recs.append({"priority":"MENOR","area":"Meta Description","problem":"Meta description corta","action":"Amplía a al menos 70 caracteres para aprovechar el espacio en los resultados de búsqueda."})
+    h1s = results["headings"]["headings"]["h1"]
+    if not h1s:
+        recs.append({"priority":"CRITICO","area":"Headings","problem":"No hay H1","action":"Añade un único H1 con la keyword principal. Es el elemento de contenido más importante para el SEO on-page."})
+    elif len(h1s) > 1:
+        recs.append({"priority":"IMPORTANTE","area":"Headings","problem":f"Hay {len(h1s)} H1","action":"Deja solo un H1 y convierte los demás en H2 o H3. Cada página debe tener exactamente un H1."})
+    if results["images"]["without_alt"] > 0:
+        recs.append({"priority":"IMPORTANTE","area":"Imagenes","problem":f'{results["images"]["without_alt"]} imagen(es) sin alt',"action":"Añade alt descriptivo a todas las imágenes. Usa keywords de forma natural. Mejora SEO y accesibilidad."})
+    if results["images"]["empty_alt"] > 0:
+        recs.append({"priority":"MENOR","area":"Imagenes","problem":f'{results["images"]["empty_alt"]} imagen(es) con alt vacío',"action":"Rellena los alt vacíos con descripciones relevantes o confirma que son decorativas (alt='' intencionalmente)."})
+    if not results["technical"]["canonical"]:
+        recs.append({"priority":"IMPORTANTE","area":"SEO Tecnico","problem":"No hay URL canónica","action":'Añade <link rel="canonical" href="URL"> en el <head>. Evita problemas de contenido duplicado.'})
+    if not results["technical"]["https"]:
+        recs.append({"priority":"CRITICO","area":"SEO Tecnico","problem":"No usa HTTPS","action":"Instala un certificado SSL. Google penaliza HTTP. Let's Encrypt es gratuito en la mayoría de hostings."})
+    if not results["technical"]["lang"]:
+        recs.append({"priority":"MENOR","area":"SEO Tecnico","problem":"Sin atributo lang","action":'Añade lang al <html>. Ejemplo: <html lang="es">. Ayuda a buscadores y lectores de pantalla.'})
+    if not results["technical"]["viewport"]:
+        recs.append({"priority":"CRITICO","area":"SEO Tecnico","problem":"Sin meta viewport","action":'Añade <meta name="viewport" content="width=device-width, initial-scale=1"> en el <head>.'})
+    if results["performance"]["load_time"] > 4:
+        recs.append({"priority":"CRITICO","area":"Performance","problem":f'Carga muy lenta: {results["performance"]["load_time"]}s',"action":"Activa Gzip/Brotli, usa CDN, optimiza imágenes y elimina recursos bloqueantes. Objetivo: <2.5s."})
+    elif results["performance"]["load_time"] > 2.5:
+        recs.append({"priority":"IMPORTANTE","area":"Performance","problem":f'Carga lenta: {results["performance"]["load_time"]}s',"action":"Activa compresión Gzip, optimiza imágenes y usa caché de navegador. Objetivo de Google para LCP: <2.5s."})
+    if results["performance"]["size_kb"] > 500:
+        recs.append({"priority":"MENOR","area":"Performance","problem":f'HTML pesado: {results["performance"]["size_kb"]} KB',"action":"Minifica el HTML y elimina comentarios y código muerto. HTML >500KB suele indicar contenido inline innecesario."})
+    essential_og = ["og:title","og:description","og:image","og:url"]
+    missing_og = [k for k in essential_og if k not in results["open_graph"]["og"]]
+    if missing_og:
+        recs.append({"priority":"MENOR","area":"Open Graph","problem":f'Faltan: {", ".join(missing_og)}',"action":"Añade las meta tags Open Graph faltantes. Controlan cómo se ve la página al compartirla en redes sociales."})
+    if not results["open_graph"]["twitter"]:
+        recs.append({"priority":"MENOR","area":"Twitter/X","problem":"Sin Twitter Card","action":'Añade <meta name="twitter:card" content="summary_large_image"> y las demás twitter: meta tags.'})
+    if results.get("schema",{}).get("count",0) == 0:
+        recs.append({"priority":"IMPORTANTE","area":"Schema.org","problem":"Sin datos estructurados","action":"Implementa Schema.org en JSON-LD. Mínimo: Organization o WebSite. Para e-commerce añade Product. Mejora los rich snippets."})
+    kw = results.get("keywords",{})
+    if kw and not kw.get("matches_title"):
+        top5 = ", ".join(k for k,_ in kw.get("top_keywords",[])[:5])
+        recs.append({"priority":"IMPORTANTE","area":"Keywords","problem":"Keywords del contenido ausentes en el título","action":f'Las palabras más frecuentes son: {top5}. Considera incluir alguna en el título y la meta description.'})
+    order = {"CRITICO":0,"IMPORTANTE":1,"MENOR":2}
+    recs.sort(key=lambda x: order.get(x["priority"],3))
+    return recs
+
 def compute_score(results):
     score = 100
     deductions = []
@@ -457,13 +571,17 @@ def build_pdf_reportlab(d):
     ]))
 
     # Bloque hero portada
+    client_name = d.get('client_name', '').strip()
+    hero_subtitle = f'Preparado para: {client_name}' if client_name else 'Auditoria SEO on-page completa'
     hero = Table([[
         Paragraph('Informe de<br/>Auditoria SEO', s_cover_h),
-    ]], colWidths=[17*cm])
+        Paragraph(hero_subtitle, S('hs', fontName='Helvetica', fontSize=10, textColor=GREEN, alignment=TA_RIGHT)),
+    ]], colWidths=[11*cm, 6*cm])
     hero.setStyle(TableStyle([
         ('BACKGROUND',(0,0),(-1,-1), DARK2),
         ('PADDING',(0,0),(-1,-1), 28),
         ('BOTTOMPADDING',(0,0),(-1,-1), 20),
+        ('VALIGN',(0,0),(-1,-1),'BOTTOM'),
     ]))
 
     # Dominio y URL
@@ -1235,10 +1353,113 @@ def build_pdf_reportlab(d):
         story.append(Spacer(1, 0.3*cm))
         story.append(Paragraph('[i] Core Web Vitals no disponibles: limite de la API de Google alcanzado. Activa una API key gratuita en console.cloud.google.com para obtener datos reales.', issue_info))
 
+    # ── KEYWORDS ──────────────────────────────────────────────────
+    kw = d.get('keywords', {})
+    if kw and kw.get('top_keywords'):
+        story.append(Spacer(1, 0.4*cm))
+        story.append(HRFlowable(width='100%', thickness=0.5, color=BORDER, spaceAfter=4))
+        story.append(Paragraph('Analisis de Keywords', h2_style))
+        kw_data = [['Keyword', 'Frecuencia', 'En titulo', 'En meta desc']]
+        for word, freq in kw['top_keywords'][:8]:
+            in_t = '[OK]' if word in kw.get('matches_title', []) else '-'
+            in_m = '[OK]' if word in kw.get('matches_meta', []) else '-'
+            kw_data.append([word, str(freq), in_t, in_m])
+        kw_table = Table(kw_data, colWidths=[6*cm, 3*cm, 4*cm, 4*cm])
+        kw_table.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), DARK),
+            ('TEXTCOLOR', (0,0), (-1,0), GREEN),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0,0), (-1,-1), 8),
+            ('ROWBACKGROUNDS', (0,1), (-1,-1), [LIGHT, WHITE]),
+            ('GRID', (0,0), (-1,-1), 0.5, BORDER),
+            ('PADDING', (0,0), (-1,-1), 6),
+            ('ALIGN', (1,0), (-1,-1), 'CENTER'),
+        ]))
+        story.append(kw_table)
+        for i in kw.get('issues', []):
+            story.append(issue_para(i))
+
+    # ── SCHEMA ────────────────────────────────────────────────────
+    schema = d.get('schema', {})
+    if schema:
+        story.append(Spacer(1, 0.4*cm))
+        story.append(HRFlowable(width='100%', thickness=0.5, color=BORDER, spaceAfter=4))
+        story.append(Paragraph('Datos Estructurados (Schema.org)', h2_style))
+        if schema.get('schemas'):
+            sc_data = [['Tipo', 'Formato']]
+            for s in schema['schemas'][:6]:
+                sc_data.append([s['type'], s['format']])
+            sc_table = Table(sc_data, colWidths=[12*cm, 5*cm])
+            sc_table.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), DARK),
+                ('TEXTCOLOR', (0,0), (-1,0), GREEN),
+                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0,0), (-1,-1), 8),
+                ('ROWBACKGROUNDS', (0,1), (-1,-1), [LIGHT, WHITE]),
+                ('GRID', (0,0), (-1,-1), 0.5, BORDER),
+                ('PADDING', (0,0), (-1,-1), 6),
+            ]))
+            story.append(sc_table)
+        for i in schema.get('issues', []):
+            story.append(issue_para(i))
+
+    # ── PAGINA DE RECOMENDACIONES ──────────────────────────────────
+    recs = d.get('recommendations', [])
+    if recs:
+        story.append(PageBreak())
+        story.append(Paragraph('Plan de accion', h1_style))
+        story.append(HRFlowable(width='100%', thickness=1.5, color=GREEN, spaceAfter=10))
+        story.append(Paragraph(
+            'Las siguientes recomendaciones estan ordenadas por prioridad. Empieza por las CRITICAS para mayor impacto en el posicionamiento.',
+            ParagraphStyle('ri', fontName='Helvetica', fontSize=8, textColor=GRAY, spaceAfter=12, leading=12)
+        ))
+
+        priority_colors = {
+            'CRITICO':    (RED,    colors.HexColor('#FEF2F2'),  colors.HexColor('#991B1B')),
+            'IMPORTANTE': (YELLOW, colors.HexColor('#FFFBEB'),  colors.HexColor('#92400E')),
+            'MENOR':      (BLUE,   colors.HexColor('#EFF6FF'),  colors.HexColor('#1E40AF')),
+        }
+
+        for i, rec in enumerate(recs, 1):
+            border_c, bg_c, txt_c = priority_colors.get(rec['priority'], (GRAY, LIGHT, DARK))
+            label_p = Paragraph(rec['priority'], ParagraphStyle('rp', fontName='Helvetica-Bold', fontSize=7, textColor=WHITE, alignment=TA_CENTER))
+            label_cell = Table([[label_p]], colWidths=[1.8*cm])
+            label_cell.setStyle(TableStyle([
+                ('BACKGROUND',(0,0),(-1,-1), border_c),
+                ('PADDING',(0,0),(-1,-1), 5),
+                ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+            ]))
+            area_p    = Paragraph(f'{i}. {rec["area"]}', ParagraphStyle('ra', fontName='Helvetica-Bold', fontSize=9, textColor=txt_c, spaceAfter=3))
+            problem_p = Paragraph(f'Problema: {clean(rec["problem"])}', ParagraphStyle('rpr', fontName='Helvetica', fontSize=8, textColor=txt_c, spaceAfter=3))
+            action_p  = Paragraph(f'Accion: {clean(rec["action"])}', ParagraphStyle('rac', fontName='Helvetica', fontSize=8, textColor=DARK3, leading=12))
+            content_cell = Table([[area_p],[problem_p],[action_p]], colWidths=[14.7*cm])
+            content_cell.setStyle(TableStyle([
+                ('PADDING',(0,0),(-1,-1), 0),
+                ('BOTTOMPADDING',(0,0),(-1,-1), 2),
+            ]))
+            rec_row = Table([[label_cell, content_cell]], colWidths=[1.8*cm, 15.2*cm])
+            rec_row.setStyle(TableStyle([
+                ('BACKGROUND',(0,0),(-1,-1), bg_c),
+                ('BOX',(0,0),(-1,-1), 0.5, border_c),
+                ('LEFTBORDER',(0,0),(0,-1), 3, border_c),
+                ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+                ('PADDING',(1,0),(1,0), 10),
+                ('LEFTPADDING',(0,0),(0,0), 0),
+                ('RIGHTPADDING',(0,0),(0,0), 0),
+                ('TOPPADDING',(0,0),(0,0), 0),
+                ('BOTTOMPADDING',(0,0),(0,0), 0),
+            ]))
+            story.append(rec_row)
+            story.append(Spacer(1, 4))
+
     story.append(Spacer(1, 0.5*cm))
     story.append(HRFlowable(width='100%', thickness=0.5, color=BORDER))
     story.append(Spacer(1, 0.2*cm))
-    story.append(Paragraph('SEO Analyzer · Alberto Labarta Holgado · github.com/Albertini97 · soyalbertolabartaholgado@gmail.com', footer_style))
+
+    # Pie con datos cliente si existen
+    client_name = d.get('client_name', '')
+    client_footer = f'  ·  Preparado para: {client_name}' if client_name else ''
+    story.append(Paragraph(f'SEO Analyzer · Alberto Labarta Holgado · github.com/Albertini97 · soyalbertolabartaholgado@gmail.com{client_footer}', footer_style))
 
     doc.build(story, canvasmaker=FooterCanvas)
     buf.seek(0)
@@ -1368,29 +1589,36 @@ def analyze():
     try:
         html, load_time, page_size = fetch_page(url)
     except requests.exceptions.Timeout:
-        return jsonify({"error": "Timeout: la página tardó demasiado en responder (>15s)"}), 400
+        return jsonify({"error": "Timeout: la página tardó demasiado en responder (>20s)"}), 400
     except requests.exceptions.SSLError:
         return jsonify({"error": "Error SSL al conectar con la página"}), 400
     except requests.exceptions.ConnectionError:
         return jsonify({"error": "No se pudo conectar con la URL"}), 400
     except Exception as e:
         return jsonify({"error": f"Error al acceder a la URL: {str(e)}"}), 400
+
     soup = BeautifulSoup(html, "html.parser")
+    title_data = analyze_title(soup)
+    meta_data  = analyze_meta_description(soup)
+
     results = {
         "url": url,
-        "title": analyze_title(soup),
-        "meta_description": analyze_meta_description(soup),
+        "title": title_data,
+        "meta_description": meta_data,
         "headings": analyze_headings(soup),
         "images": analyze_images(soup, url),
         "links": analyze_links(soup, url),
         "technical": analyze_technical(soup, url),
         "open_graph": analyze_opengraph(soup),
         "performance": analyze_performance(load_time, page_size),
+        "keywords": analyze_keywords(soup, title_data["text"], meta_data["text"]),
+        "schema": analyze_schema(soup),
         "pagespeed": fetch_pagespeed(url) if include_pagespeed else {"available": False},
     }
     score, deductions = compute_score(results)
     results["score"] = score
     results["deductions"] = deductions
+    results["recommendations"] = generate_recommendations(results)
     return jsonify(results)
 
 @app.route("/export-pdf", methods=["POST"])
@@ -1399,7 +1627,8 @@ def export_pdf():
     try:
         pdf = build_pdf_reportlab(d)
         domain = urlparse(d.get("url", "")).netloc.replace("www.", "")
-        filename = f"seo-report-{domain}.pdf"
+        client = d.get('client_name', '').strip().replace(' ', '_')
+        filename = f"seo-report-{domain}{'-para-' + client if client else ''}.pdf"
         return Response(pdf, mimetype="application/pdf",
                         headers={"Content-Disposition": f"attachment; filename={filename}"})
     except Exception as e:

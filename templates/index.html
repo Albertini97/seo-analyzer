@@ -164,6 +164,34 @@ input.url-input::placeholder{color:var(--muted)}
 .perf-track{height:3px;background:var(--border);overflow:hidden}
 .perf-fill{height:100%;transition:width 1s ease}
 
+/* RECOMENDACIONES */
+.rec-card{background:var(--surface);border:1px solid var(--border);margin-bottom:6px;display:flex;overflow:hidden}
+.rec-priority{padding:0.8rem 0.6rem;display:flex;align-items:center;justify-content:center;min-width:70px;writing-mode:horizontal-tb}
+.rec-priority span{font-family:'Space Mono',monospace;font-size:0.55rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#060810}
+.rec-body{padding:0.8rem 1rem;flex:1}
+.rec-area{font-family:'Space Mono',monospace;font-size:0.65rem;color:var(--muted2);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.05em}
+.rec-problem{font-size:0.82rem;font-weight:700;color:var(--white);margin-bottom:4px}
+.rec-action{font-size:0.78rem;color:var(--muted2);line-height:1.6}
+.rec-critico .rec-priority{background:var(--red)}
+.rec-importante .rec-priority{background:var(--yellow)}
+.rec-menor .rec-priority{background:var(--blue)}
+/* KEYWORDS */
+.kw-table{width:100%;border-collapse:collapse;font-size:0.78rem}
+.kw-table th{font-family:'Space Mono',monospace;font-size:0.6rem;color:var(--green);padding:6px 8px;border-bottom:1px solid var(--border);text-align:left;text-transform:uppercase;letter-spacing:0.05em}
+.kw-table td{padding:6px 8px;border-bottom:1px solid var(--border);color:var(--muted2)}
+.kw-table tr:last-child td{border-bottom:none}
+.kw-match{color:var(--green);font-weight:700}
+/* SCHEMA */
+.schema-list{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:1rem}
+.schema-pill{font-family:'Space Mono',monospace;font-size:0.6rem;padding:4px 10px;border:1px solid var(--border);color:var(--muted2);display:flex;align-items:center;gap:4px}
+.schema-pill.json{border-color:rgba(0,229,160,0.3);color:var(--green)}
+/* CLIENTE */
+.client-form{background:var(--surface);border:1px solid var(--border);padding:1.2rem 1.5rem;margin-bottom:1rem;display:flex;gap:1rem;align-items:center}
+.client-form label{font-family:'Space Mono',monospace;font-size:0.65rem;color:var(--muted2);white-space:nowrap}
+.client-input{flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--white);font-family:'Space Mono',monospace;font-size:0.78rem;padding:0.6rem 0.8rem;outline:none;cursor:text}
+.client-input:focus{border-color:var(--green)}
+.client-input::placeholder{color:var(--muted)}
+
 /* AUTHOR BANNER */
 .author-banner{background:var(--surface);border:1px solid var(--border);border-top:2px solid var(--green);padding:1.2rem 2rem;margin-top:2rem;display:flex;justify-content:space-between;align-items:center}
 .author-text{font-family:'Space Mono',monospace;font-size:0.7rem;color:var(--muted2)}
@@ -493,20 +521,23 @@ async function analyzeCompare() {
 async function exportPDF() {
   if (!lastResults) return;
   const btn = document.getElementById('pdfBtn');
+  const clientName = document.getElementById('clientNameInput')?.value?.trim() || '';
   btn.disabled = true;
   btn.textContent = '⏳ Generando...';
   try {
+    const payload = { ...lastResults, client_name: clientName };
     const resp = await fetch('/export-pdf', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(lastResults)
+      body: JSON.stringify(payload)
     });
     if (!resp.ok) throw new Error('Error generando PDF');
     const blob = await resp.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `seo-report-${new URL(lastResults.url).hostname}.pdf`;
+    const domain = new URL(lastResults.url).hostname;
+    a.download = `seo-report-${domain}${clientName ? '-para-' + clientName.replace(/\s+/g,'-') : ''}.pdf`;
     a.click();
     URL.revokeObjectURL(url);
   } catch(e) {
@@ -555,9 +586,6 @@ function renderResults(d) {
       <div class="score-title">${getScoreLabel(d.score)}</div>
       <div class="score-url">${d.url}</div>
       <div class="score-deductions">${d.deductions.map(x=>`<span class="deduction-pill">${x}</span>`).join('')}</div>
-    </div>
-    <div class="score-actions">
-      <button class="btn-pdf" id="pdfBtn" onclick="exportPDF()">⬇️ Exportar PDF</button>
     </div>
   </div>
 
@@ -628,6 +656,63 @@ function renderResults(d) {
         : '<p style="font-size:0.82rem;color:var(--muted);margin-bottom:1rem">No se encontraron etiquetas Open Graph</p>'}
       <ul class="issues-list">${d.open_graph.issues.map(i=>`<li>${i}</li>`).join('')}</ul>
     </div>
+
+    ${d.keywords?.top_keywords?.length ? `
+    <div class="result-card full">
+      <div class="card-header"><span class="card-icon">🔑</span><span class="card-title">Análisis de Keywords</span></div>
+      <table class="kw-table">
+        <thead><tr><th>Keyword</th><th>Frecuencia</th><th>En título</th><th>En meta desc</th></tr></thead>
+        <tbody>
+          ${d.keywords.top_keywords.slice(0,8).map(([word, freq]) => `
+            <tr>
+              <td style="color:var(--white);font-weight:500">${word}</td>
+              <td style="font-family:'Space Mono',monospace">${freq}</td>
+              <td class="${d.keywords.matches_title?.includes(word)?'kw-match':''}">
+                ${d.keywords.matches_title?.includes(word) ? '✅' : '—'}
+              </td>
+              <td class="${d.keywords.matches_meta?.includes(word)?'kw-match':''}">
+                ${d.keywords.matches_meta?.includes(word) ? '✅' : '—'}
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+      <ul class="issues-list" style="margin-top:1rem">${d.keywords.issues.map(i=>`<li>${i}</li>`).join('')}</ul>
+    </div>` : ''}
+
+    ${d.schema ? `
+    <div class="result-card full">
+      <div class="card-header"><span class="card-icon">🗂️</span><span class="card-title">Datos Estructurados (Schema.org)</span></div>
+      ${d.schema.schemas?.length ? `
+        <div class="schema-list">
+          ${d.schema.schemas.map(s=>`<div class="schema-pill ${s.format==='JSON-LD'?'json':''}">${s.type} <span style="opacity:0.5">${s.format}</span></div>`).join('')}
+        </div>` : ''}
+      <ul class="issues-list">${d.schema.issues.map(i=>`<li>${i}</li>`).join('')}</ul>
+    </div>` : ''}
+
+  </div>
+
+  ${d.recommendations?.length ? `
+  <div style="margin-top:2rem">
+    <div style="font-family:'Space Mono',monospace;font-size:0.7rem;color:var(--green);letter-spacing:0.1em;margin-bottom:1rem">// PLAN DE ACCION · ${d.recommendations.length} recomendaciones ordenadas por prioridad</div>
+    ${d.recommendations.map(r => {
+      const cls = r.priority === 'CRITICO' ? 'rec-critico' : r.priority === 'IMPORTANTE' ? 'rec-importante' : 'rec-menor';
+      const bg  = r.priority === 'CRITICO' ? 'rgba(239,68,68,0.08)' : r.priority === 'IMPORTANTE' ? 'rgba(251,191,36,0.08)' : 'rgba(59,130,246,0.08)';
+      return `<div class="rec-card ${cls}" style="background:${bg}">
+        <div class="rec-priority"><span>${r.priority}</span></div>
+        <div class="rec-body">
+          <div class="rec-area">${r.area}</div>
+          <div class="rec-problem">${r.problem}</div>
+          <div class="rec-action">➜ ${r.action}</div>
+        </div>
+      </div>`;
+    }).join('')}
+  </div>` : ''}
+
+  <div class="client-form" style="margin-top:2rem">
+    <label for="clientNameInput">Nombre del cliente para el PDF:</label>
+    <input type="text" id="clientNameInput" class="client-input" placeholder="Ej: Empresa X S.L." cursor="text">
+    <button class="btn-pdf" id="pdfBtn" onclick="exportPDF()">⬇️ Exportar PDF</button>
   </div>
 
   <div class="author-banner">
