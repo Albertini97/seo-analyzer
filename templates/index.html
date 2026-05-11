@@ -248,6 +248,21 @@ footer a{color:var(--green);text-decoration:none}
       <input type="text" id="urlInput" class="url-input" placeholder="ejemplo.com" autocomplete="off" spellcheck="false">
       <button class="analyze-btn" id="analyzeBtn" onclick="analyze()">Analizar →</button>
     </div>
+    <!-- DATOS CLIENTE -->
+    <div style="display:flex;gap:8px;margin-top:1px">
+      <div class="search-inner" style="flex:1;border-top:none">
+        <span class="url-prefix" style="font-size:0.62rem;color:var(--purple)">Cliente →</span>
+        <input type="text" id="clientNameInput" class="url-input" placeholder="Nombre del cliente (opcional — aparece en el PDF)" autocomplete="off" spellcheck="false" style="font-size:0.78rem">
+      </div>
+      <label class="logo-upload-btn" for="logoUpload" title="Subir logo del cliente">
+        🖼️
+        <input type="file" id="logoUpload" accept="image/*" style="display:none" onchange="handleLogoUpload(event)">
+      </label>
+      <div id="logoPreview" style="display:none;align-items:center;gap:6px;background:var(--surface);border:1px solid rgba(167,139,250,0.3);padding:0 10px;font-family:'Space Mono',monospace;font-size:0.6rem;color:var(--purple)">
+        <span id="logoName"></span>
+        <span onclick="removeLogo()" style="cursor:pointer;color:var(--muted)">✕</span>
+      </div>
+    </div>
     <div class="search-options">
       <label><input type="checkbox" id="includePagespeed" checked> Incluir Core Web Vitals (PageSpeed API)</label>
     </div>
@@ -400,13 +415,14 @@ function getHistory() {
   try { return JSON.parse(localStorage.getItem('seo_history') || '[]'); } catch { return []; }
 }
 
-function saveToHistory(data) {
+function saveToHistory(data, clientName = '') {
   const history = getHistory();
   const entry = {
     url: data.url,
     score: data.score,
+    client: clientName,
     date: new Date().toLocaleString('es-ES', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}),
-    data: data
+    data: { ...data, client_name: clientName }
   };
   const filtered = history.filter(h => h.url !== data.url);
   filtered.unshift(entry);
@@ -425,7 +441,9 @@ function renderHistory() {
     <div class="history-item" onclick="loadFromHistory('${h.url}')">
       <div>
         <div class="history-item-url">${h.url}</div>
-        <div style="font-family:'Space Mono',monospace;font-size:0.58rem;color:var(--muted);margin-top:3px">${h.date}</div>
+        <div style="font-family:'Space Mono',monospace;font-size:0.58rem;color:var(--muted);margin-top:3px">
+          ${h.date}${h.client ? ` · <span style="color:var(--purple)">${h.client}</span>` : ''}
+        </div>
       </div>
       <div class="history-item-score" style="color:${getScoreColor(h.score)}">${h.score}/100</div>
     </div>
@@ -449,6 +467,9 @@ function loadFromHistory(url) {
   const entry = history.find(h => h.url === url);
   if (entry) {
     lastResults = entry.data;
+    // Restaurar nombre de cliente si existe
+    const clientInput = document.getElementById('clientNameInput');
+    if (clientInput && entry.client) clientInput.value = entry.client;
     renderResults(entry.data);
     document.getElementById('historyPanel').style.display = 'none';
   }
@@ -483,7 +504,8 @@ async function analyze() {
     document.getElementById('analyzeBtn').disabled = false;
     if (data.error) { showError(data.error); return; }
     lastResults = data;
-    saveToHistory(data);
+    const clientName = document.getElementById('clientNameInput')?.value?.trim() || '';
+    saveToHistory(data, clientName);
     renderResults(data);
   } catch(e) {
     hideLoading();
@@ -525,7 +547,11 @@ async function exportPDF() {
   btn.disabled = true;
   btn.textContent = '⏳ Generando...';
   try {
-    const payload = { ...lastResults, client_name: clientName };
+    const payload = {
+      ...lastResults,
+      client_name: clientName,
+      client_logo: clientLogoBase64 || null
+    };
     const resp = await fetch('/export-pdf', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -547,7 +573,57 @@ async function exportPDF() {
   btn.innerHTML = '⬇️ Exportar PDF';
 }
 
-// ─── RENDER RESULTS ───────────────────────────────────
+// ─── EXPORT CSV ───────────────────────────────────────
+async function exportCSV() {
+  if (!lastResults) return;
+  const btn = document.getElementById('csvBtn');
+  const clientName = document.getElementById('clientNameInput')?.value?.trim() || '';
+  btn.disabled = true;
+  btn.textContent = '⏳ Generando...';
+  try {
+    const payload = { ...lastResults, client_name: clientName };
+    const resp = await fetch('/export-csv', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    });
+    if (!resp.ok) throw new Error('Error generando CSV');
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const domain = new URL(lastResults.url).hostname;
+    a.download = `seo-checklist-${domain}${clientName ? '-' + clientName.replace(/\s+/g,'-') : ''}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch(e) {
+    alert('Error al generar el CSV: ' + e.message);
+  }
+  btn.disabled = false;
+  btn.innerHTML = '📊 Exportar CSV';
+}
+
+// ─── LOGO CLIENTE ─────────────────────────────────────
+let clientLogoBase64 = null;
+
+function handleLogoUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  if (file.size > 500 * 1024) { alert('El logo debe ser menor de 500KB'); return; }
+  const reader = new FileReader();
+  reader.onload = e => {
+    clientLogoBase64 = e.target.result;
+    document.getElementById('logoName').textContent = file.name.slice(0, 20);
+    document.getElementById('logoPreview').style.display = 'flex';
+  };
+  reader.readAsDataURL(file);
+}
+
+function removeLogo() {
+  clientLogoBase64 = null;
+  document.getElementById('logoUpload').value = '';
+  document.getElementById('logoPreview').style.display = 'none';
+}
 function renderResults(d) {
   const sc = getScoreColor(d.score);
   const ps = d.pagespeed || {};
@@ -710,9 +786,16 @@ function renderResults(d) {
   </div>` : ''}
 
   <div class="client-form" style="margin-top:2rem">
-    <label for="clientNameInput">Nombre del cliente para el PDF:</label>
-    <input type="text" id="clientNameInput" class="client-input" placeholder="Ej: Empresa X S.L." cursor="text">
-    <button class="btn-pdf" id="pdfBtn" onclick="exportPDF()">⬇️ Exportar PDF</button>
+    <label for="clientNameInput" style="font-family:'Space Mono',monospace;font-size:0.65rem;color:var(--muted2);white-space:nowrap">Cliente para PDF:</label>
+    <input type="text" id="clientNameInput" class="client-input" placeholder="Nombre del cliente (aparece en portada del PDF)" style="cursor:text">
+    <button class="btn-pdf" id="pdfBtn" onclick="exportPDF()">⬇️ PDF</button>
+    <button class="btn-pdf" id="csvBtn" onclick="exportCSV()" style="border-color:var(--blue);color:var(--blue)">📊 CSV</button>
+  </div>
+
+  <div style="font-family:'Space Mono',monospace;font-size:0.65rem;color:var(--muted);margin-top:0.5rem;padding:0.6rem 1rem;background:var(--surface);border:1px solid var(--border)">
+    ℹ️ El tiempo de carga mostrado es el <strong style="color:var(--muted2)">TTFB (Time To First Byte)</strong> del servidor — distinto al tiempo de carga real del usuario.
+    Para métricas reales de usuario consulta los <strong style="color:var(--green)">Core Web Vitals</strong> de arriba (LCP, TBT, CLS) generados por Google Lighthouse.
+    <a href="https://pagespeed.web.dev/" target="_blank" style="color:var(--green);text-decoration:none;margin-left:4px">Abrir PageSpeed →</a>
   </div>
 
   <div class="author-banner">

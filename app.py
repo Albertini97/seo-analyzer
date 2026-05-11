@@ -5,6 +5,9 @@ import requests
 import time
 import re
 import io
+import os
+import csv
+import base64
 from urllib.parse import urljoin, urlparse
 from datetime import datetime
 from reportlab.lib.pagesizes import A4
@@ -13,6 +16,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable, PageBreak, KeepTogether
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
+from reportlab.platypus import Image as RLImage
 
 app = Flask(__name__)
 CORS(app)
@@ -20,8 +24,6 @@ CORS(app)
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; SEOAnalyzer/1.0; +https://github.com/Albertini97)"
 }
-
-import os
 
 PAGESPEED_API = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed"
 PAGESPEED_KEY = os.environ.get("PAGESPEED_KEY", "")
@@ -572,6 +574,7 @@ def build_pdf_reportlab(d):
 
     # Bloque hero portada
     client_name = d.get('client_name', '').strip()
+    client_logo_b64 = d.get('client_logo', '')
     hero_subtitle = f'Preparado para: {client_name}' if client_name else 'Auditoria SEO on-page completa'
     hero = Table([[
         Paragraph('Informe de<br/>Auditoria SEO', s_cover_h),
@@ -584,17 +587,38 @@ def build_pdf_reportlab(d):
         ('VALIGN',(0,0),(-1,-1),'BOTTOM'),
     ]))
 
-    # Dominio y URL
-    domain_block = Table([[
-        Paragraph(domain, S('db', fontName='Helvetica-Bold', fontSize=16, textColor=DARK, spaceAfter=4)),
-    ],[
-        Paragraph(clean(d['url'][:90]) + ('...' if len(d['url'])>90 else ''), S('ub', fontName='Courier', fontSize=7, textColor=GRAY)),
-    ]], colWidths=[17*cm])
-    domain_block.setStyle(TableStyle([
-        ('BACKGROUND',(0,0),(-1,-1), LIGHT),
-        ('PADDING',(0,0),(-1,-1), 16),
-        ('LINEBELOW',(0,-1),(-1,-1), 2, GREEN),
-    ]))
+    # Logo del cliente
+    logo_element = None
+    if client_logo_b64:
+        try:
+            header_bytes = client_logo_b64.split(',')[1] if ',' in client_logo_b64 else client_logo_b64
+            img_data = base64.b64decode(header_bytes)
+            img_buf = io.BytesIO(img_data)
+            logo_element = RLImage(img_buf, width=4*cm, height=2*cm, kind='proportional')
+        except Exception:
+            logo_element = None
+
+    # Dominio y URL — con logo si existe
+    if logo_element:
+        domain_rows = [[logo_element, Paragraph(domain, S('db', fontName='Helvetica-Bold', fontSize=16, textColor=DARK))]]
+        domain_block = Table(domain_rows, colWidths=[4.5*cm, 12.5*cm])
+        domain_block.setStyle(TableStyle([
+            ('BACKGROUND',(0,0),(-1,-1), LIGHT),
+            ('PADDING',(0,0),(-1,-1), 14),
+            ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+            ('LINEBELOW',(0,-1),(-1,-1), 2, GREEN),
+        ]))
+    else:
+        domain_block = Table([[
+            Paragraph(domain, S('db', fontName='Helvetica-Bold', fontSize=16, textColor=DARK, spaceAfter=4)),
+        ],[
+            Paragraph(clean(d['url'][:90]) + ('...' if len(d['url'])>90 else ''), S('ub', fontName='Courier', fontSize=7, textColor=GRAY)),
+        ]], colWidths=[17*cm])
+        domain_block.setStyle(TableStyle([
+            ('BACKGROUND',(0,0),(-1,-1), LIGHT),
+            ('PADDING',(0,0),(-1,-1), 16),
+            ('LINEBELOW',(0,-1),(-1,-1), 2, GREEN),
+        ]))
 
     story.append(cover_top)
     story.append(hero)
@@ -1620,6 +1644,55 @@ def analyze():
     results["deductions"] = deductions
     results["recommendations"] = generate_recommendations(results)
     return jsonify(results)
+
+@app.route("/export-csv", methods=["POST"])
+def export_csv():
+    d = request.get_json()
+    try:
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(['Prioridad', 'Area', 'Problema', 'Accion recomendada', 'Estado'])
+
+        # Recomendaciones
+        for rec in d.get('recommendations', []):
+            writer.writerow([
+                rec.get('priority', ''),
+                rec.get('area', ''),
+                rec.get('problem', ''),
+                rec.get('action', ''),
+                'Pendiente'
+            ])
+
+        # Issues adicionales
+        writer.writerow([])
+        writer.writerow(['SECCION', 'CHECK', '', '', ''])
+        sections = [
+            ('Titulo', d.get('title', {}).get('issues', [])),
+            ('Meta Description', d.get('meta_description', {}).get('issues', [])),
+            ('Headings', d.get('headings', {}).get('issues', [])),
+            ('Imagenes', d.get('images', {}).get('issues', [])),
+            ('SEO Tecnico', d.get('technical', {}).get('issues', [])),
+            ('Performance', d.get('performance', {}).get('issues', [])),
+            ('Open Graph', d.get('open_graph', {}).get('issues', [])),
+            ('Keywords', d.get('keywords', {}).get('issues', [])),
+            ('Schema', d.get('schema', {}).get('issues', [])),
+        ]
+        for section_name, issues in sections:
+            for issue in issues:
+                clean_issue = issue.replace('✅','[OK]').replace('⚠️','[!]').replace('❌','[X]').replace('ℹ️','[i]')
+                estado = 'OK' if '[OK]' in clean_issue else 'Revisar'
+                writer.writerow([section_name, clean_issue, '', '', estado])
+
+        domain = urlparse(d.get("url", "")).netloc.replace("www.", "")
+        client = d.get('client_name', '').strip().replace(' ', '_')
+        filename = f"seo-checklist-{domain}{'-' + client if client else ''}.csv"
+        return Response(
+            '\ufeff' + output.getvalue(),  # BOM para Excel
+            mimetype="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/export-pdf", methods=["POST"])
 def export_pdf():
