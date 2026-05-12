@@ -1645,6 +1645,117 @@ def analyze():
     results["recommendations"] = generate_recommendations(results)
     return jsonify(results)
 
+def analyze_single_url(url):
+    """Analiza una URL individual — usado por analyze-multi."""
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    try:
+        html, load_time, page_size = fetch_page(url)
+    except Exception as e:
+        return {"url": url, "error": str(e), "score": 0}
+    soup = BeautifulSoup(html, "html.parser")
+    title_data = analyze_title(soup)
+    meta_data  = analyze_meta_description(soup)
+    results = {
+        "url": url,
+        "title": title_data,
+        "meta_description": meta_data,
+        "headings": analyze_headings(soup),
+        "images": analyze_images(soup, url),
+        "links": analyze_links(soup, url),
+        "technical": analyze_technical(soup, url),
+        "open_graph": analyze_opengraph(soup),
+        "performance": analyze_performance(load_time, page_size),
+        "keywords": analyze_keywords(soup, title_data["text"], meta_data["text"]),
+        "schema": analyze_schema(soup),
+        "pagespeed": {"available": False},
+    }
+    score, deductions = compute_score(results)
+    results["score"] = score
+    results["deductions"] = deductions
+    results["recommendations"] = generate_recommendations(results)
+    return results
+
+@app.route("/analyze-multi", methods=["POST"])
+def analyze_multi():
+    """Analiza múltiples URLs y devuelve resultados + resumen agregado."""
+    data = request.get_json()
+    urls_raw = data.get("urls", [])
+    if not urls_raw:
+        return jsonify({"error": "Se requiere al menos una URL"}), 400
+    # Limpiar y limitar a 10 URLs
+    urls = []
+    for u in urls_raw[:10]:
+        u = u.strip()
+        if u:
+            if not u.startswith(("http://","https://")):
+                u = "https://" + u
+            urls.append(u)
+    if not urls:
+        return jsonify({"error": "No se encontraron URLs válidas"}), 400
+
+    results = []
+    for url in urls:
+        r = analyze_single_url(url)
+        results.append(r)
+
+    # Resumen agregado
+    valid = [r for r in results if "error" not in r]
+    summary = {
+        "total_urls": len(urls),
+        "analyzed": len(valid),
+        "errors": len(results) - len(valid),
+        "avg_score": round(sum(r["score"] for r in valid) / len(valid), 1) if valid else 0,
+        "min_score": min((r["score"] for r in valid), default=0),
+        "max_score": max((r["score"] for r in valid), default=0),
+        "no_title":       sum(1 for r in valid if not r["title"]["text"]),
+        "no_meta":        sum(1 for r in valid if not r["meta_description"]["text"]),
+        "no_h1":          sum(1 for r in valid if not r["headings"]["headings"]["h1"]),
+        "no_canonical":   sum(1 for r in valid if not r["technical"]["canonical"]),
+        "no_https":       sum(1 for r in valid if not r["technical"]["https"]),
+        "images_no_alt":  sum(r["images"]["without_alt"] for r in valid),
+        "slow_pages":     sum(1 for r in valid if r["performance"]["load_time"] > 3),
+        "critical_issues": [],
+    }
+    # Detectar issues críticos comunes
+    if summary["no_title"] > 0:
+        summary["critical_issues"].append(f"{summary['no_title']} página(s) sin título")
+    if summary["no_h1"] > 0:
+        summary["critical_issues"].append(f"{summary['no_h1']} página(s) sin H1")
+    if summary["no_https"] > 0:
+        summary["critical_issues"].append(f"{summary['no_https']} página(s) sin HTTPS")
+    if summary["no_canonical"] > 0:
+        summary["critical_issues"].append(f"{summary['no_canonical']} página(s) sin canonical")
+    if summary["images_no_alt"] > 0:
+        summary["critical_issues"].append(f"{summary['images_no_alt']} imagen(es) sin alt en total")
+
+    return jsonify({"results": results, "summary": summary})
+
+@app.route("/parse-sitemap", methods=["POST"])
+def parse_sitemap():
+    """Extrae URLs de un sitemap.xml."""
+    data = request.get_json()
+    sitemap_url = data.get("url", "").strip()
+    if not sitemap_url:
+        return jsonify({"error": "URL del sitemap requerida"}), 400
+    if not sitemap_url.startswith(("http://","https://")):
+        sitemap_url = "https://" + sitemap_url
+    # Si no termina en sitemap.xml, intentar añadirlo
+    if "sitemap" not in sitemap_url.lower():
+        base = sitemap_url.rstrip("/")
+        sitemap_url = base + "/sitemap.xml"
+    try:
+        resp = requests.get(sitemap_url, headers=HEADERS, timeout=10)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "xml")
+        locs = soup.find_all("loc")
+        urls = [loc.get_text(strip=True) for loc in locs if loc.get_text(strip=True)]
+        # Filtrar solo HTML (no imágenes, PDFs, etc.)
+        urls = [u for u in urls if not any(u.lower().endswith(ext) for ext in ['.jpg','.png','.gif','.pdf','.xml','.css','.js'])]
+        return jsonify({"urls": urls[:50], "total": len(urls)})
+    except Exception as e:
+        return jsonify({"error": f"No se pudo leer el sitemap: {str(e)}"}), 400
+
 @app.route("/export-csv", methods=["POST"])
 def export_csv():
     d = request.get_json()

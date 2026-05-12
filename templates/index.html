@@ -236,9 +236,10 @@ footer a{color:var(--green);text-decoration:none}
   <p class="hero-sub">Título · Meta tags · Headings · Imágenes · Core Web Vitals · Open Graph · Performance</p>
 
   <!-- TABS -->
-  <div class="tabs">
+  <div class="tabs" style="max-width:520px">
     <button class="tab active" onclick="switchTab('single')">Análisis único</button>
-    <button class="tab" onclick="switchTab('compare')">Comparar URLs</button>
+    <button class="tab" onclick="switchTab('compare')">Comparar</button>
+    <button class="tab" onclick="switchTab('multi')">Multi-URL</button>
   </div>
 
   <!-- SINGLE -->
@@ -254,7 +255,7 @@ footer a{color:var(--green);text-decoration:none}
         <span class="url-prefix" style="font-size:0.62rem;color:var(--purple)">Cliente →</span>
         <input type="text" id="clientNameInput" class="url-input" placeholder="Nombre del cliente (opcional — aparece en el PDF)" autocomplete="off" spellcheck="false" style="font-size:0.78rem">
       </div>
-      <label class="logo-upload-btn" for="logoUpload" title="Subir logo del cliente">
+      <label class="logo-upload-btn" for="logoUpload" title="Subir logo del cliente" style="background:var(--surface);border:1px solid var(--border);padding:0 14px;display:flex;align-items:center;cursor:pointer;font-size:0.9rem">
         🖼️
         <input type="file" id="logoUpload" accept="image/*" style="display:none" onchange="handleLogoUpload(event)">
       </label>
@@ -287,6 +288,22 @@ footer a{color:var(--green);text-decoration:none}
     </div>
     <div class="search-options">
       <label><input type="checkbox" id="includePagespeedCompare"> Incluir Core Web Vitals (más lento)</label>
+    </div>
+  </div>
+
+  <!-- MULTI-URL -->
+  <div id="multiForm" class="search-box" style="display:none">
+    <div style="background:var(--surface);border:1px solid var(--border)">
+      <div style="display:flex;gap:8px;padding:0.8rem 1rem;border-bottom:1px solid var(--border);align-items:center">
+        <span style="font-family:'Space Mono',monospace;font-size:0.68rem;color:var(--orange)">MULTI →</span>
+        <input type="text" id="sitemapInput" class="url-input" placeholder="sitemap.xml URL — o pega URLs abajo" style="flex:1;padding:0.4rem 0.6rem;font-size:0.75rem" autocomplete="off">
+        <button class="analyze-btn" onclick="loadSitemap()" style="background:var(--orange);padding:0 1rem;white-space:nowrap">Cargar sitemap</button>
+      </div>
+      <textarea id="multiUrlsInput" placeholder="Una URL por línea (máx. 10):&#10;https://ejemplo.com&#10;https://ejemplo.com/about&#10;https://ejemplo.com/contacto" style="width:100%;background:transparent;border:none;outline:none;color:var(--white);font-family:'Space Mono',monospace;font-size:0.72rem;padding:1rem;resize:vertical;min-height:120px;line-height:1.8" spellcheck="false"></textarea>
+      <div style="padding:0.8rem 1rem;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+        <span style="font-family:'Space Mono',monospace;font-size:0.6rem;color:var(--muted)">Máx. 10 URLs · Sin PageSpeed (para mayor velocidad)</span>
+        <button class="analyze-btn" id="multiBtn" onclick="analyzeMulti()" style="background:var(--orange)">Analizar todas →</button>
+      </div>
     </div>
   </div>
 </section>
@@ -336,10 +353,12 @@ let progressTimer = null;
 function switchTab(mode) {
   currentMode = mode;
   document.querySelectorAll('.tab').forEach((t,i) => {
-    t.classList.toggle('active', (i===0&&mode==='single')||(i===1&&mode==='compare'));
+    t.classList.toggle('active',
+      (i===0&&mode==='single')||(i===1&&mode==='compare')||(i===2&&mode==='multi'));
   });
-  document.getElementById('singleForm').style.display = mode==='single' ? 'block' : 'none';
+  document.getElementById('singleForm').style.display  = mode==='single'  ? 'block' : 'none';
   document.getElementById('compareForm').style.display = mode==='compare' ? 'block' : 'none';
+  document.getElementById('multiForm').style.display   = mode==='multi'   ? 'block' : 'none';
 }
 
 // ─── HELPERS ──────────────────────────────────────────
@@ -573,7 +592,133 @@ async function exportPDF() {
   btn.innerHTML = '⬇️ Exportar PDF';
 }
 
-// ─── EXPORT CSV ───────────────────────────────────────
+// ─── MULTI-URL ────────────────────────────────────────
+async function loadSitemap() {
+  const url = document.getElementById('sitemapInput').value.trim();
+  if (!url) return;
+  const btn = document.querySelector('#multiForm button[onclick="loadSitemap()"]');
+  btn.disabled = true; btn.textContent = '⏳ Cargando...';
+  try {
+    const resp = await fetch('/parse-sitemap', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({url})
+    });
+    const data = await resp.json();
+    if (data.error) { alert(data.error); return; }
+    document.getElementById('multiUrlsInput').value = data.urls.slice(0,10).join('\n');
+    btn.textContent = `✅ ${data.urls.length} URLs cargadas (mostrando 10)`;
+  } catch(e) {
+    alert('Error al cargar el sitemap');
+    btn.textContent = 'Cargar sitemap';
+  }
+  btn.disabled = false;
+}
+
+async function analyzeMulti() {
+  const raw = document.getElementById('multiUrlsInput').value.trim();
+  if (!raw) return;
+  const urls = raw.split('\n').map(u => u.trim()).filter(Boolean).slice(0,10);
+  if (!urls.length) return;
+
+  document.getElementById('multiBtn').disabled = true;
+  document.getElementById('results').style.display = 'none';
+  document.getElementById('error').style.display = 'none';
+  document.getElementById('loading').style.display = 'block';
+  document.getElementById('progressFill').style.width = '0%';
+  document.getElementById('dots').textContent = '...';
+  ['step1','step2','step3','step4','step5'].forEach(id => document.getElementById(id).classList.remove('active'));
+  document.getElementById('step1').classList.add('active');
+  document.getElementById('step1').textContent = `// Analizando ${urls.length} URLs...`;
+
+  // Progreso manual
+  let prog = 0;
+  const progInterval = setInterval(() => {
+    prog = Math.min(prog + 0.5, 90);
+    document.getElementById('progressFill').style.width = prog + '%';
+  }, 300);
+
+  try {
+    const resp = await fetch('/analyze-multi', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({urls})
+    });
+    const data = await resp.json();
+    clearInterval(progInterval);
+    document.getElementById('progressFill').style.width = '100%';
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('multiBtn').disabled = false;
+    if (data.error) { showError(data.error); return; }
+    renderMulti(data);
+  } catch(e) {
+    clearInterval(progInterval);
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('multiBtn').disabled = false;
+    showError('Error al conectar con el servidor.');
+  }
+}
+
+function renderMulti(data) {
+  const { results, summary } = data;
+  const avgColor = getScoreColor(summary.avg_score);
+
+  const summaryHtml = `
+  <div style="background:var(--surface);border:1px solid var(--border);padding:1.5rem 2rem;margin-bottom:2rem">
+    <div style="font-family:'Space Mono',monospace;font-size:0.7rem;color:var(--orange);letter-spacing:0.1em;margin-bottom:1.2rem">// RESUMEN · ${summary.analyzed} URLs analizadas</div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--border);margin-bottom:1.5rem">
+      ${[
+        ['Score medio', summary.avg_score, avgColor],
+        ['Score mín', summary.min_score, getScoreColor(summary.min_score)],
+        ['Score máx', summary.max_score, getScoreColor(summary.max_score)],
+        ['Páginas lentas', summary.slow_pages, summary.slow_pages>0?'var(--red)':'var(--green)'],
+      ].map(([label,val,color]) => `
+        <div style="background:var(--surface2);padding:1.2rem;text-align:center">
+          <div style="font-family:'Space Mono',monospace;font-size:1.6rem;font-weight:700;color:${color}">${val}</div>
+          <div style="font-size:0.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-top:4px">${label}</div>
+        </div>`).join('')}
+    </div>
+    ${summary.critical_issues.length ? `
+    <div style="font-family:'Space Mono',monospace;font-size:0.65rem;color:var(--red);margin-bottom:0.5rem">// Issues críticos del sitio:</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">
+      ${summary.critical_issues.map(i=>`<span style="font-family:'Space Mono',monospace;font-size:0.6rem;padding:3px 10px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);color:var(--red)">${i}</span>`).join('')}
+    </div>` : `<div style="font-family:'Space Mono',monospace;font-size:0.65rem;color:var(--green)">// Sin issues críticos detectados en el sitio</div>`}
+  </div>`;
+
+  const tableHtml = `
+  <div style="background:var(--surface);border:1px solid var(--border)">
+    <div style="display:grid;grid-template-columns:3fr 1fr 1fr 1fr 1fr 1fr;gap:1px;background:var(--border)">
+      ${['URL','Score','Título','H1','HTTPS','Canonical'].map(h=>`
+        <div style="background:var(--surface2);padding:0.7rem 1rem;font-family:'Space Mono',monospace;font-size:0.6rem;color:var(--green);text-transform:uppercase;letter-spacing:0.05em">${h}</div>
+      `).join('')}
+      ${results.map(r => {
+        if (r.error) return `
+          <div style="background:var(--surface);padding:0.8rem 1rem;font-family:'Space Mono',monospace;font-size:0.68rem;color:var(--muted2);grid-column:span 6;border-top:1px solid var(--border)">
+            ❌ ${r.url} — ${r.error}
+          </div>`;
+        const sc = getScoreColor(r.score);
+        const ck = v => v ? '<span style="color:var(--green)">✓</span>' : '<span style="color:var(--red)">✗</span>';
+        return `
+          <div style="background:var(--surface);padding:0.8rem 1rem;font-size:0.72rem;color:var(--muted2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-top:1px solid var(--border)" title="${r.url}">${r.url.replace(/^https?:\/\//,'')}</div>
+          <div style="background:var(--surface);padding:0.8rem 1rem;font-family:'Space Mono',monospace;font-weight:700;color:${sc};border-top:1px solid var(--border)">${r.score}</div>
+          <div style="background:var(--surface);padding:0.8rem 1rem;text-align:center;border-top:1px solid var(--border)">${ck(r.title.text)}</div>
+          <div style="background:var(--surface);padding:0.8rem 1rem;text-align:center;border-top:1px solid var(--border)">${ck(r.headings.headings.h1.length)}</div>
+          <div style="background:var(--surface);padding:0.8rem 1rem;text-align:center;border-top:1px solid var(--border)">${ck(r.technical.https)}</div>
+          <div style="background:var(--surface);padding:0.8rem 1rem;text-align:center;border-top:1px solid var(--border)">${ck(r.technical.canonical)}</div>`;
+      }).join('')}
+    </div>
+  </div>`;
+
+  const el = document.getElementById('results');
+  el.innerHTML = summaryHtml + tableHtml + `
+  <div class="author-banner" style="margin-top:1.5rem">
+    <div class="author-text">Construido por <strong>Alberto Labarta Holgado</strong> · Full Stack Dev &amp; SEO Specialist · Zaragoza 🇪🇸</div>
+    <div class="author-links">
+      <a href="https://github.com/Albertini97" target="_blank" class="author-link">GitHub ↗</a>
+      <a href="https://www.linkedin.com/in/alberto-labarta-holgado-877969ab/" target="_blank" class="author-link">LinkedIn ↗</a>
+    </div>
+  </div>`;
+  el.style.display = 'block';
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
 async function exportCSV() {
   if (!lastResults) return;
   const btn = document.getElementById('csvBtn');
@@ -624,9 +769,49 @@ function removeLogo() {
   document.getElementById('logoUpload').value = '';
   document.getElementById('logoPreview').style.display = 'none';
 }
+function buildMiniSparkline(history, url, currentScore) {
+  const entries = history.filter(h => h.url === url).slice(0, 6).reverse();
+  if (entries.length < 2) return '';
+  const scores = [...entries.map(e => e.score), currentScore];
+  const min = Math.min(...scores) - 5;
+  const max = Math.max(...scores) + 5;
+  const W = 80, H = 24;
+  const pts = scores.map((s, i) => {
+    const x = (i / (scores.length - 1)) * W;
+    const y = H - ((s - min) / (max - min)) * H;
+    return `${x},${y}`;
+  }).join(' ');
+  return `<svg width="${W}" height="${H}" style="flex-shrink:0">
+    <polyline points="${pts}" fill="none" stroke="var(--green)" stroke-width="1.5"/>
+    ${scores.map((s,i) => {
+      const x = (i / (scores.length-1)) * W;
+      const y = H - ((s-min)/(max-min)) * H;
+      return `<circle cx="${x}" cy="${y}" r="2" fill="var(--green)"/>`;
+    }).join('')}
+  </svg>`;
+}
+
+// ─── RENDER RESULTS ───────────────────────────────────
 function renderResults(d) {
   const sc = getScoreColor(d.score);
   const ps = d.pagespeed || {};
+
+  // ── Comparativa histórica ────────────────────────────
+  const history = getHistory();
+  const prev = history.find(h => h.url === d.url && h.score !== d.score);
+  let trendHtml = '';
+  if (prev) {
+    const diff = d.score - prev.score;
+    const arrow = diff > 0 ? '↑' : '↓';
+    const trendColor = diff > 0 ? 'var(--green)' : 'var(--red)';
+    trendHtml = `
+    <div style="background:var(--surface);border:1px solid var(--border);padding:0.8rem 1.5rem;margin-bottom:1rem;display:flex;align-items:center;gap:1.5rem">
+      <div style="font-family:'Space Mono',monospace;font-size:0.65rem;color:var(--muted2)">// COMPARATIVA vs análisis anterior (${prev.date})</div>
+      <div style="font-family:'Space Mono',monospace;font-size:1.1rem;font-weight:700;color:${trendColor}">${arrow} ${Math.abs(diff)} puntos</div>
+      <div style="font-family:'Space Mono',monospace;font-size:0.7rem;color:var(--muted2)">${prev.score} → <strong style="color:${sc}">${d.score}</strong></div>
+      ${buildMiniSparkline(history, d.url, d.score)}
+    </div>`;
+  }
 
   let cwvHtml = '';
   if (ps.available) {
@@ -653,6 +838,7 @@ function renderResults(d) {
   }
 
   const html = `
+  ${trendHtml}
   <div class="score-banner" style="--score-color:${sc}">
     <div class="score-circle">
       <div class="score-num">${d.score}</div>
