@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SEO Analyzer · Alberto Labarta</title>
+<title>Auditly · Alberto Labarta</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Bricolage+Grotesque:wght@300;400;600;700;800&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
@@ -223,17 +223,17 @@ footer a{color:var(--green);text-decoration:none}
 <body>
 
 <header>
-  <div class="logo">seo-analyzer <span class="logo-sub">by Alberto Labarta</span></div>
+  <div class="logo">auditly <span class="logo-sub">by Alberto Labarta</span></div>
   <div class="nav-right">
     <button class="history-btn" onclick="toggleHistory()">📋 Historial</button>
-    <a href="https://github.com/Albertini97/seo-analyzer" target="_blank" class="gh-link">GitHub ↗</a>
+    <a href="https://github.com/Albertini97/auditly" target="_blank" class="gh-link">GitHub ↗</a>
   </div>
 </header>
 
 <section class="hero">
   <div class="hero-grid"></div>
-  <h1>Analiza el SEO de<br>cualquier <span>web</span></h1>
-  <p class="hero-sub">Título · Meta tags · Headings · Imágenes · Core Web Vitals · Open Graph · Performance</p>
+  <h1><span>Auditly</span> — Auditoría SEO<br>de cualquier web</h1>
+  <p class="hero-sub">Título · Meta tags · Headings · Imágenes · Core Web Vitals · Schema · Keywords · Open Graph</p>
 
   <!-- TABS -->
   <div class="tabs" style="max-width:520px">
@@ -338,8 +338,8 @@ footer a{color:var(--green);text-decoration:none}
 <div id="results"></div>
 
 <footer>
-  <span>Construido con Python · Flask · BeautifulSoup por <a href="https://github.com/Albertini97" target="_blank">Alberto Labarta</a></span>
-  <span><a href="https://www.linkedin.com/in/alberto-labarta-holgado-877969ab/" target="_blank">LinkedIn</a> · <a href="https://github.com/Albertini97" target="_blank">GitHub</a></span>
+  <span>Auditly · Construido con Python · Flask · BeautifulSoup por <a href="https://github.com/Albertini97" target="_blank">Alberto Labarta</a></span>
+  <span><a href="https://www.linkedin.com/in/alberto-labarta-holgado-877969ab/" target="_blank">LinkedIn</a> · <a href="https://github.com/Albertini97/auditly" target="_blank">GitHub</a></span>
 </footer>
 
 <script>
@@ -431,7 +431,7 @@ function showError(msg) {
 
 // ─── HISTORY ──────────────────────────────────────────
 function getHistory() {
-  try { return JSON.parse(localStorage.getItem('seo_history') || '[]'); } catch { return []; }
+  try { return JSON.parse(localStorage.getItem('auditly_history') || '[]'); } catch { return []; }
 }
 
 function saveToHistory(data, clientName = '') {
@@ -445,7 +445,7 @@ function saveToHistory(data, clientName = '') {
   };
   const filtered = history.filter(h => h.url !== data.url);
   filtered.unshift(entry);
-  localStorage.setItem('seo_history', JSON.stringify(filtered.slice(0, 10)));
+  localStorage.setItem('auditly_history', JSON.stringify(filtered.slice(0, 10)));
   renderHistory();
 }
 
@@ -477,7 +477,7 @@ function toggleHistory() {
 }
 
 function clearHistory() {
-  localStorage.removeItem('seo_history');
+  localStorage.removeItem('auditly_history');
   renderHistory();
 }
 

@@ -22,7 +22,7 @@ app = Flask(__name__)
 CORS(app)
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; SEOAnalyzer/1.0; +https://github.com/Albertini97)"
+    "User-Agent": "Mozilla/5.0 (compatible; Auditly/1.0; +https://github.com/Albertini97)"
 }
 
 PAGESPEED_API = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed"
@@ -542,7 +542,7 @@ def build_pdf_reportlab(d):
                 if i > 0:
                     self.setFont('Helvetica', 7)
                     self.setFillColor(LGRAY)
-                    self.drawString(2*cm, 1.2*cm, 'SEO Analyzer · Alberto Labarta Holgado · github.com/Albertini97')
+                    self.drawString(2*cm, 1.2*cm, 'Auditly · Alberto Labarta Holgado · github.com/Albertini97')
                     self.drawRightString(PAGE_W-2*cm, 1.2*cm, f'Pagina {i} de {total-1}')
                     self.setStrokeColor(BORDER)
                     self.setLineWidth(0.5)
@@ -563,7 +563,7 @@ def build_pdf_reportlab(d):
     # ══════════════════════════════════════════════════════════
     # Cabecera oscura
     cover_top = Table([[
-        Paragraph('SEO ANALYZER', S('logo', fontName='Helvetica-Bold', fontSize=9, textColor=GREEN, spaceAfter=0)),
+        Paragraph('AUDITLY', S('logo', fontName='Helvetica-Bold', fontSize=9, textColor=GREEN, spaceAfter=0)),
         Paragraph(now, S('date', fontName='Helvetica', fontSize=8, textColor=LGRAY, alignment=TA_RIGHT))
     ]], colWidths=[8.5*cm, 8.5*cm])
     cover_top.setStyle(TableStyle([
@@ -927,7 +927,7 @@ def build_pdf_reportlab(d):
     story.append(Spacer(1, 0.5*cm))
     story.append(HRFlowable(width='100%', thickness=1, color=GREEN))
     story.append(Spacer(1, 0.2*cm))
-    story.append(Paragraph('SEO Analyzer  ·  Alberto Labarta Holgado  ·  github.com/Albertini97  ·  soyalbertolabartaholgado@gmail.com', s_footer))
+    story.append(Paragraph('Auditly  ·  Alberto Labarta Holgado  ·  github.com/Albertini97  ·  soyalbertolabartaholgado@gmail.com', s_footer))
 
     doc.build(story, canvasmaker=FooterCanvas)
     buf.seek(0)
@@ -1060,7 +1060,7 @@ def build_pdf_reportlab(d):
             self.saveState()
             self.setFont('Helvetica', 7)
             self.setFillColor(LGRAY)
-            self.drawString(2*cm, 1.2*cm, f'SEO Analyzer · Alberto Labarta Holgado · github.com/Albertini97')
+            self.drawString(2*cm, 1.2*cm, f'Auditly · Alberto Labarta Holgado · github.com/Albertini97')
             self.drawRightString(PAGE_W - 2*cm, 1.2*cm, f'Pagina {page_num} de {total}')
             self.setStrokeColor(BORDER)
             self.setLineWidth(0.5)
@@ -1084,7 +1084,7 @@ def build_pdf_reportlab(d):
 
     # Fondo oscuro simulado con tabla
     cover_data = [[
-        Paragraph('SEO Analyzer', ParagraphStyle('cta', fontName='Helvetica-Bold', fontSize=10, textColor=GREEN, spaceAfter=16)),
+        Paragraph('Auditly', ParagraphStyle('cta', fontName='Helvetica-Bold', fontSize=10, textColor=GREEN, spaceAfter=16)),
     ]]
     story.append(Spacer(1, 0.5*cm))
     story.append(Paragraph('Informe de Auditoria SEO', cover_title))
@@ -1483,7 +1483,7 @@ def build_pdf_reportlab(d):
     # Pie con datos cliente si existen
     client_name = d.get('client_name', '')
     client_footer = f'  ·  Preparado para: {client_name}' if client_name else ''
-    story.append(Paragraph(f'SEO Analyzer · Alberto Labarta Holgado · github.com/Albertini97 · soyalbertolabartaholgado@gmail.com{client_footer}', footer_style))
+    story.append(Paragraph(f'Auditly · Alberto Labarta Holgado · github.com/Albertini97 · soyalbertolabartaholgado@gmail.com{client_footer}', footer_style))
 
     doc.build(story, canvasmaker=FooterCanvas)
     buf.seek(0)
@@ -1550,7 +1550,7 @@ def build_pdf_html(d):
       .og-val{{font-size:0.72rem;color:#555;word-break:break-all}}
     </style></head><body>
     <div class="header">
-      <div><h1>🔍 SEO Analyzer Report</h1><div style="color:#6B7A94;font-size:0.8rem;margin-top:4px">{d['url']}</div></div>
+      <div><h1>🔍 Auditly Report</h1><div style="color:#6B7A94;font-size:0.8rem;margin-top:4px">{d['url']}</div></div>
       <div class="meta"><div>Generado el {now}</div><div style="margin-top:4px">by Alberto Labarta · github.com/Albertini97</div></div>
     </div>
     <div class="score-box">
@@ -1594,7 +1594,7 @@ def build_pdf_html(d):
     <div class="section"><h2>📱 Open Graph</h2>
       {'<div class="og-grid">' + ''.join(f'<div class="og-item"><div class="og-key">{k}</div><div class="og-val">{v[:80]}</div></div>' for k,v in list(d['open_graph']['og'].items())[:8]) + '</div>' if d['open_graph']['og'] else '<p style="font-size:0.8rem;color:#9ca3af">No se encontraron etiquetas Open Graph</p>'}
       <ul>{issues_html(d['open_graph']['issues'])}</ul></div>
-    <div class="footer">SEO Analyzer · Construido por Alberto Labarta · github.com/Albertini97</div>
+    <div class="footer">Auditly · Construido por Alberto Labarta · github.com/Albertini97</div>
     </body></html>"""
 
 @app.route("/")

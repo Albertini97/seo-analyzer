@@ -1,4 +1,4 @@
-# 🔍 SEO Analyzer
+# 🔍 Auditly
 
 Herramienta web para analizar el SEO on-page de cualquier URL. Construida con **Python + Flask + BeautifulSoup** en el backend y **HTML/CSS/JS vanilla** en el frontend.
 
@@ -20,8 +20,8 @@ Herramienta web para analizar el SEO on-page de cualquier URL. Construida con **
 
 ```bash
 # 1. Clona el repositorio
-git clone https://github.com/Albertini97/seo-analyzer
-cd seo-analyzer
+git clone https://github.com/Albertini97/auditly
+cd auditly
 
 # 2. Instala dependencias
 pip install -r requirements.txt
@@ -41,7 +41,7 @@ http://localhost:5050
 ## 📁 Estructura
 
 ```
-seo-analyzer/
+auditly/
 ├── app.py              # Backend Flask + lógica de análisis
 ├── requirements.txt    # Dependencias Python
 ├── templates/
