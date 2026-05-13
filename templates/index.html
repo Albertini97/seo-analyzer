@@ -415,7 +415,8 @@ function showLoading(includePS) {
   startProgress(steps);
   timeoutTimer = setTimeout(() => {
     document.getElementById('timeoutWarning').style.display = 'block';
-  }, 8000);
+    document.getElementById('timeoutWarning').textContent = '⏳ El servidor está calentando motores o la página analizada responde lento. Puede tardar hasta 30 segundos en la primera petición...';
+  }, 6000);
 }
 
 function hideLoading() {
@@ -424,9 +425,34 @@ function hideLoading() {
 }
 
 function showError(msg) {
+  // Mensajes de error amigables
+  const friendly = {
+    'Timeout': '⏱️ La página tardó demasiado en responder. Prueba sin los Core Web Vitals (desmarca la opción) o inténtalo de nuevo.',
+    'SSL': '🔒 Error de seguridad al conectar. Prueba con http:// en vez de https://',
+    'conectar': '🌐 No se pudo conectar con esa URL. Comprueba que la web está activa e inténtalo de nuevo.',
+    'servidor': '⚙️ El servidor tardó en responder. Espera unos segundos e inténtalo de nuevo.',
+  };
+  let text = msg;
+  for (const [key, val] of Object.entries(friendly)) {
+    if (msg.toLowerCase().includes(key.toLowerCase())) { text = val; break; }
+  }
   const el = document.getElementById('error');
-  el.textContent = '❌ ' + msg;
+  el.textContent = text;
   el.style.display = 'block';
+}
+
+// ── Keep-alive: ping cada 4 minutos para evitar cold starts ──
+function startKeepAlive() {
+  setInterval(async () => {
+    try { await fetch('/ping'); } catch(e) {}
+  }, 4 * 60 * 1000);
+}
+
+// ── Warm-up: pre-calentar el servidor al cargar la página ────
+async function warmUp() {
+  try {
+    await fetch('/ping');
+  } catch(e) {}
 }
 
 // ─── HISTORY ──────────────────────────────────────────
@@ -513,11 +539,15 @@ async function analyze() {
   showLoading(includePS);
 
   try {
+    const controller = new AbortController();
+    const fetchTimeout = setTimeout(() => controller.abort(), 90000);
     const resp = await fetch('/analyze', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ url, pagespeed: includePS })
+      body: JSON.stringify({ url, pagespeed: includePS }),
+      signal: controller.signal
     });
+    clearTimeout(fetchTimeout);
     const data = await resp.json();
     hideLoading();
     document.getElementById('analyzeBtn').disabled = false;
@@ -529,7 +559,11 @@ async function analyze() {
   } catch(e) {
     hideLoading();
     document.getElementById('analyzeBtn').disabled = false;
-    showError('Error al conectar con el servidor.');
+    if (e.name === 'AbortError') {
+      showError('⏱️ La petición tardó demasiado. Prueba sin los Core Web Vitals (desmarca la opción) o inténtalo de nuevo.');
+    } else {
+      showError('Error al conectar con el servidor. Espera unos segundos e inténtalo de nuevo.');
+    }
   }
 }
 
@@ -1068,6 +1102,8 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('urlInput').addEventListener('keydown', e => { if(e.key==='Enter') analyze(); });
   document.getElementById('urlB').addEventListener('keydown', e => { if(e.key==='Enter') analyzeCompare(); });
   renderHistory();
+  warmUp();
+  startKeepAlive();
 });
 </script>
 </body>

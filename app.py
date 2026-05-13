@@ -1818,5 +1818,13 @@ def export_pdf():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/ping")
+def ping():
+    return jsonify({"status": "ok", "service": "Auditly"}), 200
+
+@app.route("/health")
+def health():
+    return jsonify({"status": "healthy"}), 200
+
 if __name__ == "__main__":
     app.run(debug=True, port=5050)
